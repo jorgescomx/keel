@@ -1,0 +1,376 @@
+"use client";
+
+import React, { useMemo, useState } from "react";
+import { X, Columns3, List, Trash2, Sparkles, AlertCircle, CheckCircle2 } from "lucide-react";
+import type { ProjectBundle, ProjectView } from "@/types";
+import { compileQuery } from "@/lib/query";
+import { cn } from "@/lib/utils";
+
+interface ViewEditorModalProps {
+  bundle: ProjectBundle;
+  editingView?: ProjectView | null;
+  initialDraft?: {
+    layout: "board" | "list";
+    query: string;
+    hiddenStatusIds: string[];
+    swimlaneBy: string;
+    compact: boolean;
+  };
+  canDelete: boolean;
+  onClose: () => void;
+  onSaved: (savedView: ProjectView) => Promise<void>;
+  onDeleted?: (viewId: string) => Promise<void>;
+}
+
+export function ViewEditorModal({
+  bundle,
+  editingView,
+  initialDraft,
+  canDelete,
+  onClose,
+  onSaved,
+  onDeleted,
+}: ViewEditorModalProps) {
+  const { project, statuses, customFields, itemTypes, items } = bundle;
+  const isEdit = Boolean(editingView);
+
+  const [name, setName] = useState(editingView?.name ?? "");
+  const [layout, setLayout] = useState<"board" | "list">(
+    editingView?.layout ?? initialDraft?.layout ?? "board"
+  );
+  const [query, setQuery] = useState(
+    editingView?.query ?? initialDraft?.query ?? ""
+  );
+  const [hiddenStatusIds, setHiddenStatusIds] = useState<string[]>(
+    editingView?.hiddenStatusIds ?? initialDraft?.hiddenStatusIds ?? []
+  );
+  const [swimlaneBy, setSwimlaneBy] = useState(
+    editingView?.swimlaneBy ?? initialDraft?.swimlaneBy ?? "none"
+  );
+  const [compact, setCompact] = useState(
+    editingView?.compact ?? initialDraft?.compact ?? false
+  );
+  const [submitting, setSubmitting] = useState(false);
+
+  const selectFields = useMemo(
+    () => customFields.filter((cf) => cf.fieldType === "select"),
+    [customFields]
+  );
+
+  const queryCheck = useMemo(
+    () =>
+      compileQuery(query, {
+        itemTypes,
+        statuses,
+        customFields,
+        allItems: items,
+      }),
+    [query, itemTypes, statuses, customFields, items]
+  );
+
+  const matchCount = useMemo(() => {
+    if (!queryCheck.ok) return 0;
+    return items.filter(queryCheck.matches).length;
+  }, [queryCheck, items]);
+
+  const toggleHiddenStatus = (statusId: string) => {
+    setHiddenStatusIds((prev) => {
+      const isHidden = prev.includes(statusId);
+      if (isHidden) return prev.filter((id) => id !== statusId);
+      // Keep at least 1 visible column
+      if (statuses.length - prev.length <= 1) return prev;
+      return [...prev, statusId];
+    });
+  };
+
+  const exampleQueries = useMemo(() => {
+    const firstType = itemTypes[0]?.name ?? "Task";
+    const firstSelect = selectFields[0];
+    const list = [
+      `priority in (urgent, high)`,
+      `type = ${firstType}`,
+      `status != Done`,
+    ];
+    if (firstSelect && firstSelect.options[0]) {
+      list.push(`${firstSelect.name} = ${firstSelect.options[0].label}`);
+    }
+    return list;
+  }, [itemTypes, selectFields]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !queryCheck.ok) return;
+    setSubmitting(true);
+    try {
+      const url = isEdit
+        ? `/api/projects/${project.id}/views/${editingView!.id}`
+        : `/api/projects/${project.id}/views`;
+      const method = isEdit ? "PATCH" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          layout,
+          query: query.trim(),
+          hiddenStatusIds,
+          swimlaneBy,
+          compact,
+        }),
+      });
+      if (res.ok) {
+        const saved: ProjectView = await res.json();
+        await onSaved(saved);
+        onClose();
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!editingView || !onDeleted) return;
+    if (!window.confirm(`Delete view "${editingView.name}"?`)) return;
+    await fetch(`/api/projects/${project.id}/views/${editingView.id}`, {
+      method: "DELETE",
+    });
+    await onDeleted(editingView.id);
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-xl rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#161922] shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-5 py-3.5 bg-slate-50/70 dark:bg-[#1b1f2b]">
+          <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+            {isEdit ? `Edit View: ${editingView!.name}` : "Create Custom View / Board"}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-slate-400 hover:bg-slate-200/70 dark:hover:bg-slate-800"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px] gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                View Name *
+              </label>
+              <input
+                type="text"
+                autoFocus
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Urgent Triage, Frontend Board, QA Queue"
+                className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                Layout
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setLayout("board")}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 rounded-md border py-2 text-xs font-semibold transition-colors",
+                    layout === "board"
+                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
+                      : "border-slate-200 dark:border-slate-700 text-slate-500"
+                  )}
+                >
+                  <Columns3 className="h-3.5 w-3.5" />
+                  Board
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLayout("list")}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 rounded-md border py-2 text-xs font-semibold transition-colors",
+                    layout === "list"
+                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
+                      : "border-slate-200 dark:border-slate-700 text-slate-500"
+                  )}
+                >
+                  <List className="h-3.5 w-3.5" />
+                  List
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* JQL-style Filter Query */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                <Sparkles className="h-3 w-3 text-blue-500" />
+                Filter Query (JQL-style)
+              </label>
+              {query.trim() &&
+                (queryCheck.ok ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Matches {matchCount}{" "}
+                    {matchCount === 1
+                      ? project.settings.defaultNounSingular.toLowerCase()
+                      : project.settings.defaultNounPlural.toLowerCase()}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-500">
+                    <AlertCircle className="h-3 w-3" />
+                    {queryCheck.error}
+                  </span>
+                ))}
+            </div>
+            <textarea
+              rows={2}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder='Leave empty to show all, or e.g. priority in (urgent, high) AND status != Done'
+              className={cn(
+                "w-full rounded-md border bg-white dark:bg-[#11141d] px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2",
+                query.trim() && !queryCheck.ok
+                  ? "border-red-400 focus:ring-red-500/30"
+                  : "border-slate-200 dark:border-slate-700 focus:ring-blue-500/40"
+              )}
+            />
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <span className="text-[10.5px] text-slate-400">Examples:</span>
+              {exampleQueries.map((ex) => (
+                <button
+                  key={ex}
+                  type="button"
+                  onClick={() => setQuery(ex)}
+                  className="rounded bg-slate-100 dark:bg-slate-800 px-2 py-0.5 font-mono text-[10.5px] text-slate-600 dark:text-slate-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-600"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {layout === "board" && (
+            <>
+              {/* Visible Columns */}
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+                  Visible Columns on this Board
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {statuses.map((s) => {
+                    const visible = !hiddenStatusIds.includes(s.id);
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => toggleHiddenStatus(s.id)}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-all",
+                          visible
+                            ? "border-blue-500/50 bg-blue-50/70 dark:bg-blue-950/35 text-slate-800 dark:text-slate-100"
+                            : "border-slate-200 dark:border-slate-700 text-slate-400 line-through opacity-60"
+                        )}
+                      >
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{ backgroundColor: s.color }}
+                        />
+                        {s.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Default Swimlane + Density */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                    Default Swimlanes
+                  </label>
+                  <select
+                    value={swimlaneBy}
+                    onChange={(e) => setSwimlaneBy(e.target.value)}
+                    className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs"
+                  >
+                    <option value="none">None</option>
+                    <option value="priority">Priority</option>
+                    <option value="type">Item Type</option>
+                    <option value="parent">Parent Item</option>
+                    {selectFields.map((cf) => (
+                      <option key={cf.id} value={`cf:${cf.id}`}>
+                        {cf.name} (Custom)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-end pb-1.5">
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={compact}
+                      onChange={(e) => setCompact(e.target.checked)}
+                      className="h-4 w-4 rounded text-blue-600"
+                    />
+                    Compact cards
+                  </label>
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
+            {isEdit && canDelete ? (
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete View
+              </button>
+            ) : (
+              <span />
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting || !name.trim() || !queryCheck.ok}
+                className="rounded-md bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {submitting
+                  ? "Saving..."
+                  : isEdit
+                    ? "Save View"
+                    : "Create View"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
