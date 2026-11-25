@@ -12,6 +12,7 @@ import {
   VALID_CUSTOM_FIELD_TYPES,
 } from "@/lib/api";
 import type { CustomFieldType } from "@/types";
+import { requireProjectAccess } from "@/lib/auth";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -22,6 +23,9 @@ export async function POST(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id: projectId } = await params;
+
+  const access = await requireProjectAccess(projectId, "admin");
+  if (!access.ok) return access.response;
 
   const [project] = await db
     .select({ id: projects.id })

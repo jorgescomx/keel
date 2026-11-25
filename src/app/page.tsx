@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { asc, eq } from "drizzle-orm";
 import { db, ensureDbReady } from "@/db";
 import {
@@ -6,6 +7,7 @@ import {
   statuses,
   customFields,
   items,
+  projectMembers,
 } from "@/db/schema";
 import {
   serializeProject,
@@ -15,24 +17,39 @@ import {
   serializeItem,
 } from "@/db/serializers";
 import { ensureProjectViews } from "@/db/ensureViews";
+import { getCurrentUser } from "@/lib/auth";
 import { WorkspaceApp } from "@/components/WorkspaceApp";
-import type { ProjectBundle } from "@/types";
+import type { ProjectBundle, ProjectRole } from "@/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   await ensureDbReady();
 
-  const projectRows = await db
-    .select()
+  const currentUser = await getCurrentUser();
+  if (!currentUser) {
+    redirect("/login");
+  }
+
+  const memberProjectRows = await db
+    .select({
+      project: projects,
+      role: projectMembers.role,
+    })
     .from(projects)
+    .innerJoin(projectMembers, eq(projects.id, projectMembers.projectId))
+    .where(eq(projectMembers.userId, currentUser.id))
     .orderBy(asc(projects.createdAt));
 
-  const serializedProjects = projectRows.map(serializeProject);
+  const serializedProjects = memberProjectRows.map((r) =>
+    serializeProject(r.project)
+  );
   let initialBundle: ProjectBundle | null = null;
 
   if (serializedProjects.length > 0) {
     const first = serializedProjects[0];
+    const firstRole = memberProjectRows[0].role as ProjectRole;
+
     const [typeRows, statusRows, fieldRows, itemRows, projectViews] =
       await Promise.all([
         db
@@ -60,6 +77,7 @@ export default async function HomePage() {
 
     initialBundle = {
       project: first,
+      myRole: firstRole,
       itemTypes: typeRows.map(serializeItemType),
       statuses: statusRows.map(serializeStatus),
       customFields: fieldRows.map(serializeCustomField),
@@ -70,6 +88,7 @@ export default async function HomePage() {
 
   return (
     <WorkspaceApp
+      currentUser={currentUser}
       initialProjects={serializedProjects}
       initialBundle={initialBundle}
     />

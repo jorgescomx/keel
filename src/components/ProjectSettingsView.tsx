@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Plus,
   Trash2,
@@ -12,10 +12,16 @@ import {
   Sliders,
   LayoutGrid,
   Check,
+  Users,
+  Copy,
+  Mail,
 } from "lucide-react";
 import type {
   CustomFieldType,
   ProjectBundle,
+  ProjectInvitation,
+  ProjectMember,
+  ProjectRole,
   ProjectSettings,
   SelectOption,
   StatusCategory,
@@ -31,7 +37,7 @@ interface ProjectSettingsViewProps {
   onDeleteProject: (projectId: string) => Promise<void>;
 }
 
-type SettingsTab = "general" | "types" | "columns" | "fields" | "cards";
+type SettingsTab = "general" | "types" | "columns" | "fields" | "cards" | "members";
 
 export function ProjectSettingsView({
   bundle,
@@ -76,6 +82,99 @@ export function ProjectSettingsView({
     "Option A, Option B, Option C"
   );
   const [newFieldShowOnCard, setNewFieldShowOnCard] = useState(true);
+
+  // Members & Invitations state
+  const [members, setMembers] = useState<ProjectMember[]>([]);
+  const [invitations, setInvitations] = useState<ProjectInvitation[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<ProjectRole>("member");
+  const [inviteError, setInviteError] = useState("");
+  const [latestInviteUrl, setLatestInviteUrl] = useState("");
+  const [copiedToken, setCopiedToken] = useState("");
+
+  const canManageMembers =
+    bundle.myRole === "owner" || bundle.myRole === "admin";
+
+  const loadMembers = async () => {
+    const res = await fetch(`/api/projects/${project.id}/members`);
+    if (res.ok) {
+      const data = await res.json();
+      setMembers(data.members ?? []);
+      setInvitations(data.invitations ?? []);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "members") {
+      loadMembers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, project.id]);
+
+  const handleInviteMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInviteError("");
+    setLatestInviteUrl("");
+    const res = await fetch(`/api/projects/${project.id}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setInviteError(data.error ?? "Failed to invite user");
+      return;
+    }
+    setInviteEmail("");
+    if (data.status === "invited" && data.invitation?.token) {
+      const url = `${window.location.origin}/invite/${data.invitation.token}`;
+      setLatestInviteUrl(url);
+      flashSaved("Invite link created");
+    } else {
+      flashSaved("Member added to project");
+    }
+    await loadMembers();
+  };
+
+  const handleChangeMemberRole = async (memberId: string, role: ProjectRole) => {
+    const res = await fetch(`/api/projects/${project.id}/members/${memberId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    });
+    if (res.ok) {
+      flashSaved("Role updated");
+      await loadMembers();
+    } else {
+      const d = await res.json();
+      setInviteError(d.error ?? "Could not change role");
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string, isInvite = false) => {
+    const res = await fetch(
+      `/api/projects/${project.id}/members/${memberId}${isInvite ? "?kind=invite" : ""}`,
+      { method: "DELETE" }
+    );
+    if (res.ok) {
+      flashSaved(isInvite ? "Invitation revoked" : "Member removed");
+      await loadMembers();
+    } else {
+      const d = await res.json();
+      setInviteError(d.error ?? "Could not remove");
+    }
+  };
+
+  const copyInviteLink = async (token: string) => {
+    const url = `${window.location.origin}/invite/${token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedToken(token);
+      setTimeout(() => setCopiedToken(""), 2000);
+    } catch {
+      setLatestInviteUrl(url);
+    }
+  };
 
   const flashSaved = (msg = "Saved") => {
     setSavedNotice(msg);
@@ -307,6 +406,11 @@ export function ProjectSettingsView({
       id: "cards",
       label: "Card Display",
       icon: <LayoutGrid className="h-4 w-4" />,
+    },
+    {
+      id: "members",
+      label: "Members & Invites",
+      icon: <Users className="h-4 w-4" />,
     },
   ];
 
@@ -1100,6 +1204,193 @@ export function ProjectSettingsView({
                 />
               </label>
             ))}
+          </div>
+        )}
+
+        {/* TAB 6: MEMBERS & INVITES */}
+        {tab === "members" && (
+          <div className="space-y-4">
+            {inviteError && (
+              <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+                {inviteError}
+              </div>
+            )}
+
+            {latestInviteUrl && (
+              <div className="rounded-lg bg-blue-50/80 dark:bg-blue-950/35 border border-blue-200 dark:border-blue-800 p-3.5 space-y-1.5">
+                <div className="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                  Share this invitation link (valid for 7 days):
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={latestInviteUrl}
+                    className="flex-1 rounded border border-blue-200 dark:border-blue-800 bg-white dark:bg-[#11141d] px-2.5 py-1 font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard.writeText(latestInviteUrl)}
+                    className="inline-flex items-center gap-1 rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+                  >
+                    <Copy className="h-3 w-3" />
+                    Copy
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {canManageMembers && (
+              <form
+                onSubmit={handleInviteMember}
+                className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-[#161922]/70 p-4 flex flex-wrap items-end gap-3"
+              >
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                    Invite by Email
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="teammate@example.com"
+                    className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-3 py-1.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                    Role
+                  </label>
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value as ProjectRole)}
+                    className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs"
+                  >
+                    <option value="member">Member (edit cards)</option>
+                    <option value="admin">Admin (manage project)</option>
+                    <option value="viewer">Viewer (read-only)</option>
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  Add / Invite
+                </button>
+              </form>
+            )}
+
+            {/* Current Members */}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#161922] overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Project Members ({members.length})
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {members.map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600/15 text-blue-600 dark:text-blue-400 font-bold text-xs">
+                        {m.name.slice(0, 1).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="font-semibold text-slate-800 dark:text-slate-100">
+                          {m.name}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          {m.email}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {canManageMembers ? (
+                        <select
+                          value={m.role}
+                          onChange={(e) =>
+                            handleChangeMemberRole(
+                              m.id,
+                              e.target.value as ProjectRole
+                            )
+                          }
+                          className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2 py-1 text-xs font-medium capitalize"
+                        >
+                          <option value="owner">Owner</option>
+                          <option value="admin">Admin</option>
+                          <option value="member">Member</option>
+                          <option value="viewer">Viewer</option>
+                        </select>
+                      ) : (
+                        <span className="rounded bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[11px] font-semibold capitalize text-slate-600 dark:text-slate-300">
+                          {m.role}
+                        </span>
+                      )}
+
+                      {canManageMembers && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMember(m.id, false)}
+                          className="rounded p-1 text-slate-400 hover:text-red-500"
+                          title="Remove member"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Pending Invitations */}
+            {invitations.length > 0 && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#161922] overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Pending Invitations ({invitations.length})
+                </div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {invitations.map((inv) => (
+                    <div
+                      key={inv.id}
+                      className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-xs"
+                    >
+                      <div>
+                        <span className="font-semibold text-slate-800 dark:text-slate-100">
+                          {inv.email}
+                        </span>
+                        <span className="ml-2 rounded bg-amber-500/12 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-600 dark:text-amber-400 capitalize">
+                          {inv.role}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => copyInviteLink(inv.token)}
+                          className="inline-flex items-center gap-1 rounded border border-slate-200 dark:border-slate-700 px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:border-blue-400 hover:text-blue-600"
+                        >
+                          <Copy className="h-3 w-3" />
+                          {copiedToken === inv.token ? "Copied!" : "Copy Link"}
+                        </button>
+                        {canManageMembers && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMember(inv.id, true)}
+                            className="rounded p-1 text-slate-400 hover:text-red-500"
+                            title="Revoke invitation"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -14,6 +14,8 @@ import {
   validateItemReferences,
 } from "@/lib/api";
 import type { Priority } from "@/types";
+import { requireProjectAccess } from "@/lib/auth";
+import { encryptString } from "@/lib/crypto";
 
 type Params = { params: Promise<{ itemId: string }> };
 
@@ -30,6 +32,9 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Item not found" }, { status: 404 });
   }
 
+  const access = await requireProjectAccess(existing.projectId, "member");
+  if (!access.ok) return access.response;
+
   const [projectRow] = await db
     .select()
     .from(projects)
@@ -43,10 +48,12 @@ export async function PATCH(req: Request, { params }: Params) {
   };
 
   if (typeof body.title === "string" && body.title.trim()) {
-    updateData.title = body.title.trim().slice(0, LIMITS.TITLE);
+    updateData.title = encryptString(body.title.trim().slice(0, LIMITS.TITLE));
   }
   if (typeof body.description === "string") {
-    updateData.description = body.description.slice(0, LIMITS.DESCRIPTION);
+    updateData.description = encryptString(
+      body.description.slice(0, LIMITS.DESCRIPTION)
+    );
   }
 
   let nextTypeId: string | undefined;
@@ -129,7 +136,7 @@ export async function PATCH(req: Request, { params }: Params) {
         { status: 400 }
       );
     }
-    updateData.customFields = JSON.stringify(cf);
+    updateData.customFields = encryptString(JSON.stringify(cf));
   }
 
   if (typeof body.position === "number" && Number.isFinite(body.position)) {
@@ -150,12 +157,15 @@ export async function DELETE(req: Request, { params }: Params) {
   const { itemId } = await params;
 
   const [existing] = await db
-    .select({ id: items.id })
+    .select({ id: items.id, projectId: items.projectId })
     .from(items)
     .where(eq(items.id, itemId));
   if (!existing) {
     return NextResponse.json({ error: "Item not found" }, { status: 404 });
   }
+
+  const access = await requireProjectAccess(existing.projectId, "member");
+  if (!access.ok) return access.response;
 
   await db.transaction(async (tx) => {
     // Clear parentId on children so they aren't orphaned with dangling refs

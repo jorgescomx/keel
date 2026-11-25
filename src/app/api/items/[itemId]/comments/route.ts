@@ -5,12 +5,25 @@ import { db, ensureDbReady } from "@/db";
 import { comments, items } from "@/db/schema";
 import { serializeComment } from "@/db/serializers";
 import { checkSameOrigin, LIMITS, parseJsonBody } from "@/lib/api";
+import { requireProjectAccess } from "@/lib/auth";
+import { encryptString } from "@/lib/crypto";
 
 type Params = { params: Promise<{ itemId: string }> };
 
 export async function GET(_req: Request, { params }: Params) {
   await ensureDbReady();
   const { itemId } = await params;
+
+  const [itemRow] = await db
+    .select({ id: items.id, projectId: items.projectId })
+    .from(items)
+    .where(eq(items.id, itemId));
+  if (!itemRow) {
+    return NextResponse.json({ error: "Item not found" }, { status: 404 });
+  }
+
+  const access = await requireProjectAccess(itemRow.projectId, "viewer");
+  if (!access.ok) return access.response;
 
   const rows = await db
     .select()
@@ -30,12 +43,15 @@ export async function POST(req: Request, { params }: Params) {
   const { itemId } = await params;
 
   const [itemRow] = await db
-    .select({ id: items.id })
+    .select({ id: items.id, projectId: items.projectId })
     .from(items)
     .where(eq(items.id, itemId));
   if (!itemRow) {
     return NextResponse.json({ error: "Item not found" }, { status: 404 });
   }
+
+  const access = await requireProjectAccess(itemRow.projectId, "member");
+  if (!access.ok) return access.response;
 
   const text =
     typeof body.body === "string"
@@ -48,17 +64,14 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
-  const author =
-    typeof body.author === "string" && body.author.trim()
-      ? body.author.trim().slice(0, LIMITS.AUTHOR)
-      : "You";
+  const author = access.user.name.slice(0, LIMITS.AUTHOR) || "User";
 
   const commentId = crypto.randomUUID();
   await db.insert(comments).values({
     id: commentId,
     itemId,
     author,
-    body: text,
+    body: encryptString(text),
     createdAt: new Date().toISOString(),
   });
 
@@ -76,6 +89,18 @@ export async function DELETE(req: Request, { params }: Params) {
   if (originError) return originError;
 
   const { itemId } = await params;
+
+  const [itemRow] = await db
+    .select({ id: items.id, projectId: items.projectId })
+    .from(items)
+    .where(eq(items.id, itemId));
+  if (!itemRow) {
+    return NextResponse.json({ error: "Item not found" }, { status: 404 });
+  }
+
+  const access = await requireProjectAccess(itemRow.projectId, "member");
+  if (!access.ok) return access.response;
+
   const { searchParams } = new URL(req.url);
   const commentId = searchParams.get("commentId");
   if (!commentId) {

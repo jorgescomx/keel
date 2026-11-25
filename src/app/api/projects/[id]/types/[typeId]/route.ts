@@ -10,6 +10,7 @@ import {
   sanitizeColor,
   sanitizeIcon,
 } from "@/lib/api";
+import { requireProjectAccess } from "@/lib/auth";
 
 type Params = { params: Promise<{ id: string; typeId: string }> };
 
@@ -20,6 +21,9 @@ export async function PATCH(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id: projectId, typeId } = await params;
+
+  const access = await requireProjectAccess(projectId, "admin");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select()
@@ -81,6 +85,9 @@ export async function DELETE(req: Request, { params }: Params) {
   if (originError) return originError;
 
   const { id: projectId, typeId } = await params;
+
+  const access = await requireProjectAccess(projectId, "admin");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select({ id: itemTypes.id })

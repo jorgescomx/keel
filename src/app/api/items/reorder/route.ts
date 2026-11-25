@@ -12,6 +12,8 @@ import {
   validateItemReferences,
 } from "@/lib/api";
 import type { Priority } from "@/types";
+import { requireProjectAccess } from "@/lib/auth";
+import { encryptString } from "@/lib/crypto";
 
 export async function POST(req: Request) {
   await ensureDbReady();
@@ -130,6 +132,10 @@ export async function POST(req: Request) {
   const existingById = new Map(existingRows.map((r) => [r.id, r]));
 
   const projectIds = [...new Set(existingRows.map((r) => r.projectId))];
+  for (const pid of projectIds) {
+    const access = await requireProjectAccess(pid, "member");
+    if (!access.ok) return access.response;
+  }
   const projectRows =
     projectIds.length > 0
       ? await db
@@ -175,7 +181,7 @@ export async function POST(req: Request) {
       if (u.typeId !== undefined) patch.typeId = u.typeId;
       if (u.parentId !== undefined) patch.parentId = u.parentId;
       if (u.customFields !== undefined) {
-        patch.customFields = JSON.stringify(u.customFields);
+        patch.customFields = encryptString(JSON.stringify(u.customFields));
       }
       await tx.update(items).set(patch).where(eq(items.id, u.id));
     }

@@ -35,6 +35,8 @@ if (process.env.NODE_ENV !== "production") {
 export const db = drizzle(client, { schema });
 
 async function initTables() {
+  await client.execute("PRAGMA journal_mode = WAL;");
+  await client.execute("PRAGMA busy_timeout = 5000;");
   await client.execute("PRAGMA foreign_keys = ON;");
 
   await client.execute(`
@@ -157,14 +159,102 @@ async function initTables() {
       position INTEGER NOT NULL DEFAULT 0
     );
   `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      is_master_admin INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // Safe migration for existing databases created before users.is_master_admin existed
+  try {
+    await client.execute(
+      `ALTER TABLE users ADD COLUMN is_master_admin INTEGER NOT NULL DEFAULT 0;`
+    );
+  } catch {
+    // Column already exists
+  }
+
+  // Ensure at least one master admin exists if users already exist
+  const adminCheck = await client.execute(
+    `SELECT COUNT(*) AS cnt FROM users WHERE is_master_admin = 1;`
+  );
+  const adminCount = Number(adminCheck.rows[0]?.cnt ?? 0);
+  if (adminCount === 0) {
+    await client.execute(`
+      UPDATE users
+      SET is_master_admin = 1
+      WHERE id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1);
+    `);
+  }
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS passkeys (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      public_key TEXT NOT NULL,
+      counter INTEGER NOT NULL DEFAULT 0,
+      transports TEXT NOT NULL DEFAULT '[]',
+      device_name TEXT NOT NULL DEFAULT 'Passkey',
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS webauthn_challenges (
+      id TEXT PRIMARY KEY,
+      challenge TEXT NOT NULL,
+      user_id TEXT,
+      purpose TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+  `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS project_members (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'member',
+      created_at TEXT NOT NULL,
+      UNIQUE(project_id, user_id)
+    );
+  `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS project_invitations (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      token TEXT NOT NULL UNIQUE,
+      invited_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TEXT NOT NULL,
+      accepted_at TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
 }
 
 export async function ensureDbReady() {
   if (!globalThis.__keelInitialized) {
     globalThis.__keelInitialized = (async () => {
       await initTables();
-      const { seedIfEmpty } = await import("./seed");
-      await seedIfEmpty();
     })();
   }
   await globalThis.__keelInitialized;

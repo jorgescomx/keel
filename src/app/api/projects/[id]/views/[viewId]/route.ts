@@ -10,6 +10,8 @@ import {
   sanitizeStringArray,
   sanitizeViewFilters,
 } from "@/lib/api";
+import { requireProjectAccess } from "@/lib/auth";
+import { encryptString } from "@/lib/crypto";
 
 type Params = { params: Promise<{ id: string; viewId: string }> };
 
@@ -20,6 +22,9 @@ export async function PATCH(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id: projectId, viewId } = await params;
+
+  const access = await requireProjectAccess(projectId, "member");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select()
@@ -38,7 +43,7 @@ export async function PATCH(req: Request, { params }: Params) {
     patch.layout = body.layout;
   }
   if (typeof body.query === "string") {
-    patch.query = body.query.slice(0, LIMITS.QUERY);
+    patch.query = encryptString(body.query.slice(0, LIMITS.QUERY));
   }
   if (body.filters && typeof body.filters === "object") {
     patch.filters = JSON.stringify(sanitizeViewFilters(body.filters));
@@ -80,6 +85,9 @@ export async function DELETE(req: Request, { params }: Params) {
   if (originError) return originError;
 
   const { id: projectId, viewId } = await params;
+
+  const access = await requireProjectAccess(projectId, "member");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select({ id: views.id })

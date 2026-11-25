@@ -27,12 +27,17 @@ import {
   sanitizeColor,
   sanitizeIcon,
 } from "@/lib/api";
+import { requireProjectAccess } from "@/lib/auth";
+import { encryptString } from "@/lib/crypto";
 
 type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, { params }: Params) {
   await ensureDbReady();
   const { id } = await params;
+
+  const access = await requireProjectAccess(id, "viewer");
+  if (!access.ok) return access.response;
 
   const [projectRow] = await db
     .select()
@@ -72,6 +77,7 @@ export async function GET(_req: Request, { params }: Params) {
 
   return NextResponse.json({
     project: serializedProject,
+    myRole: access.role,
     itemTypes: typeRows.map(serializeItemType),
     statuses: statusRows.map(serializeStatus),
     customFields: fieldRows.map(serializeCustomField),
@@ -87,6 +93,9 @@ export async function PATCH(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id } = await params;
+
+  const access = await requireProjectAccess(id, "admin");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select()
@@ -126,7 +135,9 @@ export async function PATCH(req: Request, { params }: Params) {
     updateData.key = cleanedKey;
   }
   if (typeof body.description === "string") {
-    updateData.description = body.description.slice(0, LIMITS.DESCRIPTION);
+    updateData.description = encryptString(
+      body.description.slice(0, LIMITS.DESCRIPTION)
+    );
   }
   if (typeof body.icon === "string") {
     updateData.icon = sanitizeIcon(body.icon, existing.icon);
@@ -165,6 +176,9 @@ export async function DELETE(req: Request, { params }: Params) {
   if (originError) return originError;
 
   const { id } = await params;
+
+  const access = await requireProjectAccess(id, "owner");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select({ id: projects.id })
