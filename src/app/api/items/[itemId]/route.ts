@@ -11,6 +11,7 @@ import {
   sanitizeDueDate,
   sanitizeStringArray,
   VALID_PRIORITIES,
+  validateCustomFieldValuesForProject,
   validateItemReferences,
 } from "@/lib/api";
 import type { Priority } from "@/types";
@@ -135,6 +136,13 @@ export async function PATCH(req: Request, { params }: Params) {
         { error: "customFields must be an object" },
         { status: 400 }
       );
+    }
+    const cfError = await validateCustomFieldValuesForProject(
+      existing.projectId,
+      cf
+    );
+    if (cfError) {
+      return NextResponse.json({ error: cfError }, { status: 400 });
     }
     updateData.customFields = encryptString(JSON.stringify(cf));
   }

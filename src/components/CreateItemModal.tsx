@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import type { Priority, ProjectBundle } from "@/types";
 import { PRIORITY_LIST, PRIORITY_META } from "@/lib/icons";
 import { getValidParentCandidates } from "@/lib/hierarchy";
+import { LabelInput } from "./LabelInput";
+import { MultiSelectDropdown } from "./MultiSelectDropdown";
 
 interface CreateItemModalProps {
   bundle: ProjectBundle;
@@ -49,12 +51,17 @@ export function CreateItemModal({
     defaults?.priority ?? "medium"
   );
   const [parentId, setParentId] = useState<string>(defaults?.parentId ?? "");
-  const [labelsRaw, setLabelsRaw] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState("");
   const [cfValues, setCfValues] = useState<Record<string, unknown>>(
     defaults?.customFields ?? {}
   );
   const [submitting, setSubmitting] = useState(false);
+
+  const existingProjectLabels = useMemo(
+    () => items.flatMap((i) => i.labels),
+    [items]
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -83,10 +90,6 @@ export function CreateItemModal({
     if (!title.trim() || !typeId || !statusId) return;
     setSubmitting(true);
     try {
-      const labels = labelsRaw
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
       await onCreate({
         title: title.trim(),
         description,
@@ -242,14 +245,13 @@ export function CreateItemModal({
 
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-              Labels (comma separated)
+              Labels
             </label>
-            <input
-              type="text"
-              value={labelsRaw}
-              onChange={(e) => setLabelsRaw(e.target.value)}
-              placeholder="e.g. frontend, quick-win"
-              className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-3 py-1.5 text-xs"
+            <LabelInput
+              value={labels}
+              existingLabels={existingProjectLabels}
+              onChange={setLabels}
+              placeholder="Type a label & press Enter..."
             />
           </div>
 
@@ -271,13 +273,29 @@ export function CreateItemModal({
                       }
                       className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs"
                     >
-                      <option value="">— None —</option>
+                      <option value="">— Select —</option>
                       {cf.options.map((o) => (
                         <option key={o.id} value={o.id}>
                           {o.label}
                         </option>
                       ))}
                     </select>
+                  ) : cf.fieldType === "multi_select" ? (
+                    <MultiSelectDropdown
+                      options={cf.options}
+                      value={
+                        Array.isArray(cfValues[cf.id])
+                          ? (cfValues[cf.id] as string[])
+                          : []
+                      }
+                      onChange={(next) =>
+                        setCfValues((prev) => ({
+                          ...prev,
+                          [cf.id]: next,
+                        }))
+                      }
+                      placeholder={`Select ${cf.name.toLowerCase()}...`}
+                    />
                   ) : cf.fieldType === "checkbox" ? (
                     <input
                       type="checkbox"
