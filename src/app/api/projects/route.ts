@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db, ensureDbReady } from "@/db";
-import { projects, itemTypes, statuses } from "@/db/schema";
+import { projects, itemTypes, statuses, projectMembers } from "@/db/schema";
 import { serializeProject } from "@/db/serializers";
 import { DEFAULT_PROJECT_SETTINGS } from "@/types";
 import {
@@ -12,11 +12,22 @@ import {
   sanitizeColor,
   sanitizeIcon,
 } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
+import { encryptString } from "@/lib/crypto";
 
 export async function GET() {
   await ensureDbReady();
-  const rows = await db.select().from(projects).orderBy(asc(projects.createdAt));
-  return NextResponse.json(rows.map(serializeProject));
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+
+  const rows = await db
+    .select({ project: projects })
+    .from(projects)
+    .innerJoin(projectMembers, eq(projects.id, projectMembers.projectId))
+    .where(eq(projectMembers.userId, auth.user.id))
+    .orderBy(asc(projects.createdAt));
+
+  return NextResponse.json(rows.map((r) => serializeProject(r.project)));
 }
 
 export async function POST(req: Request) {
@@ -24,6 +35,9 @@ export async function POST(req: Request) {
   const parsed = await parseJsonBody(req);
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
+
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
 
   const name =
     typeof body.name === "string"
@@ -74,13 +88,22 @@ export async function POST(req: Request) {
         id: projectId,
         name,
         key: rawKey,
-        description,
+        description: encryptString(description),
         icon: sanitizeIcon(body.icon, "Layers"),
         color: sanitizeColor(body.color, "#3b82f6"),
         itemCounter: 0,
         settings: JSON.stringify(settings),
         createdAt: now,
         updatedAt: now,
+      });
+
+      // Creator becomes owner of the project
+      await tx.insert(projectMembers).values({
+        id: crypto.randomUUID(),
+        projectId,
+        userId: auth.user.id,
+        role: "owner",
+        createdAt: now,
       });
 
       // Seed starter item types (no "Issue"!)

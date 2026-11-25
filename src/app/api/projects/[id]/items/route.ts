@@ -14,6 +14,8 @@ import {
   validateItemReferences,
 } from "@/lib/api";
 import type { Priority } from "@/types";
+import { requireProjectAccess } from "@/lib/auth";
+import { encryptString } from "@/lib/crypto";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -24,6 +26,9 @@ export async function POST(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id: projectId } = await params;
+
+  const access = await requireProjectAccess(projectId, "member");
+  if (!access.ok) return access.response;
 
   const [projectRow] = await db
     .select()
@@ -125,15 +130,15 @@ export async function POST(req: Request, { params }: Params) {
       projectId,
       key,
       number: nextNum,
-      title,
-      description,
+      title: encryptString(title),
+      description: encryptString(description),
       typeId,
       statusId,
       priority,
       parentId,
       labels: JSON.stringify(labels),
       dueDate,
-      customFields: JSON.stringify(customFieldVals),
+      customFields: encryptString(JSON.stringify(customFieldVals)),
       position: nextPos,
       createdAt: now,
       updatedAt: now,

@@ -21,12 +21,15 @@ import {
   Sparkles,
   AlertCircle,
   Eye,
+  Settings,
+  Shield,
 } from "lucide-react";
 import type {
   Priority,
   Project,
   ProjectBundle,
   ProjectView,
+  User,
   WorkItem,
 } from "@/types";
 import { DynamicIcon, PRIORITY_LIST, PRIORITY_META } from "@/lib/icons";
@@ -41,13 +44,17 @@ import { CreateItemModal } from "./CreateItemModal";
 import { CreateProjectModal } from "./CreateProjectModal";
 import { CommandPalette } from "./CommandPalette";
 import { ViewEditorModal } from "./ViewEditorModal";
+import { AccountSecurityModal } from "./AccountSecurityModal";
+import { AdminConsoleView } from "./AdminConsoleView";
 
 interface WorkspaceAppProps {
+  currentUser: User;
   initialProjects: Project[];
   initialBundle: ProjectBundle | null;
 }
 
 export function WorkspaceApp({
+  currentUser,
   initialProjects,
   initialBundle,
 }: WorkspaceAppProps) {
@@ -58,11 +65,12 @@ export function WorkspaceApp({
   const [bundle, setBundle] = useState<ProjectBundle | null>(initialBundle);
   const [loadingProject, setLoadingProject] = useState(false);
 
-  // Navigation: either an active ProjectView or "settings"
-  const [mode, setMode] = useState<"view" | "settings">("view");
+  // Navigation: active ProjectView, project "settings", or master "admin" console
+  const [mode, setMode] = useState<"view" | "settings" | "admin">("view");
   const [activeViewId, setActiveViewId] = useState<string>(
     initialBundle?.views[0]?.id ?? ""
   );
+  const [showQueryBar, setShowQueryBar] = useState(false);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
@@ -99,6 +107,7 @@ export function WorkspaceApp({
   } | null>(null);
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
   const [viewModalState, setViewModalState] = useState<{
     open: boolean;
     editingView: ProjectView | null;
@@ -124,6 +133,7 @@ export function WorkspaceApp({
     setFilterTypeId("all");
     setFilterPriority("all");
     setShowColumnsMenu(false);
+    setShowQueryBar(false);
   }, []);
 
   // Initialize theme
@@ -720,7 +730,7 @@ export function WorkspaceApp({
             </div>
 
             {/* Project Settings */}
-            <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800">
+            <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 space-y-0.5">
               <button
                 type="button"
                 onClick={() => setMode("settings")}
@@ -735,6 +745,25 @@ export function WorkspaceApp({
                 Customize Project & Flow
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Master Admin Console link (always visible for Master Admins, even with 0 projects) */}
+        {currentUser.isMasterAdmin && (
+          <div className={cn("px-3 pb-2", !bundle && "pt-3 flex-1")}>
+            <button
+              type="button"
+              onClick={() => setMode("admin")}
+              className={cn(
+                "w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors",
+                mode === "admin"
+                  ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-semibold"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/50"
+              )}
+            >
+              <Shield className="h-4 w-4 text-amber-500" />
+              Master Admin
+            </button>
           </div>
         )}
 
@@ -770,7 +799,16 @@ export function WorkspaceApp({
                 <PanelLeftOpen className="h-4 w-4" />
               </button>
             )}
-            {bundle && (
+            {mode === "admin" ? (
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
+                  <Shield className="h-3.5 w-3.5" />
+                </span>
+                <h1 className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+                  Master Admin Console
+                </h1>
+              </div>
+            ) : bundle ? (
               <div className="flex items-center gap-2 min-w-0">
                 <span
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-white shrink-0"
@@ -790,8 +828,35 @@ export function WorkspaceApp({
                     ? "Customize Project & Flow"
                     : activeView?.name ?? "Board"}
                 </span>
+                {mode === "view" && activeView && (
+                  <button
+                    type="button"
+                    onClick={() => setShowQueryBar((prev) => !prev)}
+                    title={
+                      showQueryBar
+                        ? "Hide board query & view settings"
+                        : "Show board query & view settings"
+                    }
+                    className={cn(
+                      "relative rounded-md p-1 transition-colors",
+                      showQueryBar
+                        ? "bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400"
+                        : "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200"
+                    )}
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                    {(jqlQuery.trim() !== "" || isViewDirty) && (
+                      <span
+                        className={cn(
+                          "absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full",
+                          isViewDirty ? "bg-amber-500" : "bg-blue-500"
+                        )}
+                      />
+                    )}
+                  </button>
+                )}
               </div>
-            )}
+            ) : null}
           </div>
 
           <div className="flex items-center gap-2">
@@ -830,76 +895,93 @@ export function WorkspaceApp({
                 <Moon className="h-4 w-4" />
               )}
             </button>
+
+            <button
+              type="button"
+              onClick={() => setShowAccountModal(true)}
+              title="Account, Passkeys & Security"
+              className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-[#1a1f2c] pl-1.5 pr-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-blue-400 transition-colors"
+            >
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white">
+                {currentUser.name.slice(0, 1).toUpperCase()}
+              </span>
+              <span className="hidden sm:inline max-w-[100px] truncate">
+                {currentUser.name}
+              </span>
+            </button>
           </div>
         </header>
 
-        {/* View Toolbar: JQL Query Bar + Quick Filters + Swimlanes + Columns */}
+        {/* View Toolbar: Collapsible JQL Query Bar (via gear icon) + Quick Filters + Swimlanes + Columns */}
         {bundle && mode === "view" && activeView && (
           <div className="border-b border-slate-200/80 dark:border-slate-800 bg-white/75 dark:bg-[#131620]/75 shrink-0">
-            {/* Row 1: JQL-style Query Bar + Save View actions */}
-            <div className="flex flex-wrap items-center gap-2 px-5 pt-2.5 pb-2">
-              <div className="relative flex-1 min-w-[260px]">
-                <Sparkles className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-500" />
-                <input
-                  type="text"
-                  value={jqlQuery}
-                  onChange={(e) => setJqlQuery(e.target.value)}
-                  placeholder='Query (JQL-style): e.g. priority in (urgent, high) AND status != Done  |  workstream = Frontend'
-                  className={cn(
-                    "w-full rounded-md border bg-white dark:bg-[#11141d] pl-8 pr-8 py-1.5 font-mono text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2",
-                    jqlQuery.trim() && !compiledQuery.ok
-                      ? "border-red-400 focus:ring-red-500/30"
-                      : "border-slate-200 dark:border-slate-700 focus:ring-blue-500/40"
+            {/* Row 1: JQL-style Query Bar + Save View actions (revealed by gear icon next to board name) */}
+            {showQueryBar && (
+              <div className="flex flex-wrap items-center gap-2 px-5 pt-2.5 pb-2 border-b border-slate-100 dark:border-slate-800/80">
+                <div className="relative flex-1 min-w-[260px]">
+                  <Sparkles className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-500" />
+                  <input
+                    type="text"
+                    autoFocus
+                    value={jqlQuery}
+                    onChange={(e) => setJqlQuery(e.target.value)}
+                    placeholder='Query (JQL-style): e.g. priority in (urgent, high) AND status != Done  |  workstream = Frontend'
+                    className={cn(
+                      "w-full rounded-md border bg-white dark:bg-[#11141d] pl-8 pr-8 py-1.5 font-mono text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2",
+                      jqlQuery.trim() && !compiledQuery.ok
+                        ? "border-red-400 focus:ring-red-500/30"
+                        : "border-slate-200 dark:border-slate-700 focus:ring-blue-500/40"
+                    )}
+                  />
+                  {jqlQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setJqlQuery("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   )}
-                />
-                {jqlQuery && (
+                </div>
+
+                {jqlQuery.trim() && !compiledQuery.ok && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-500">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    {compiledQuery.error}
+                  </span>
+                )}
+
+                {isViewDirty && compiledQuery.ok && (
                   <button
                     type="button"
-                    onClick={() => setJqlQuery("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    onClick={handleSaveCurrentView}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <Save className="h-3.5 w-3.5" />
+                    Save View
                   </button>
                 )}
-              </div>
 
-              {jqlQuery.trim() && !compiledQuery.ok && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-500">
-                  <AlertCircle className="h-3.5 w-3.5" />
-                  {compiledQuery.error}
-                </span>
-              )}
-
-              {isViewDirty && compiledQuery.ok && (
                 <button
                   type="button"
-                  onClick={handleSaveCurrentView}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
+                  onClick={() =>
+                    setViewModalState({
+                      open: true,
+                      editingView: null,
+                      draftFromCurrent: true,
+                    })
+                  }
+                  title="Save current query & layout as a new view"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:border-blue-400 hover:text-blue-600 transition-colors"
                 >
-                  <Save className="h-3.5 w-3.5" />
-                  Save View
+                  <CopyPlus className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">Save as New</span>
                 </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() =>
-                  setViewModalState({
-                    open: true,
-                    editingView: null,
-                    draftFromCurrent: true,
-                  })
-                }
-                title="Save current query & layout as a new view"
-                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:border-blue-400 hover:text-blue-600 transition-colors"
-              >
-                <CopyPlus className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">Save as New</span>
-              </button>
-            </div>
+              </div>
+            )}
 
             {/* Row 2: Quick Filters + Swimlanes + Columns + Density */}
-            <div className="flex flex-wrap items-center justify-between gap-2 px-5 pb-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
@@ -1109,12 +1191,34 @@ export function WorkspaceApp({
             </div>
           )}
 
-          {bundle ? (
+          {mode === "admin" && currentUser.isMasterAdmin ? (
+            <AdminConsoleView
+              currentUser={currentUser}
+              onProjectsChanged={async () => {
+                const nextProjects = await fetchProjects();
+                if (
+                  activeProjectId &&
+                  !nextProjects.some((p) => p.id === activeProjectId)
+                ) {
+                  if (nextProjects[0]) {
+                    setActiveProjectId(nextProjects[0].id);
+                    await fetchBundle(nextProjects[0].id, true);
+                  } else {
+                    setActiveProjectId("");
+                    setBundle(null);
+                  }
+                } else if (!activeProjectId && nextProjects[0]) {
+                  setActiveProjectId(nextProjects[0].id);
+                  await fetchBundle(nextProjects[0].id, true);
+                }
+              }}
+            />
+          ) : bundle ? (
             mode === "settings" ? (
               <ProjectSettingsView
                 key={bundle.project.id}
                 bundle={bundle}
-                canDeleteProject={projects.length > 1}
+                canDeleteProject={bundle.myRole === "owner"}
                 onRefresh={handleRefreshAll}
                 onDeleteProject={handleDeleteProject}
               />
@@ -1247,6 +1351,13 @@ export function WorkspaceApp({
           onSelectItem={(item) => setSelectedItemId(item.id)}
           onOpenSettings={() => setMode("settings")}
           onCreateItem={() => setCreateItemDefaults({})}
+        />
+      )}
+
+      {showAccountModal && (
+        <AccountSecurityModal
+          user={currentUser}
+          onClose={() => setShowAccountModal(false)}
         />
       )}
     </div>

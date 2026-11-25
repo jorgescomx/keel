@@ -100,3 +100,72 @@ export const views = sqliteTable("views", {
   compact: integer("compact", { mode: "boolean" }).notNull().default(false),
   position: integer("position").notNull().default(0),
 });
+
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  isMasterAdmin: integer("is_master_admin", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  createdAt: text("created_at").notNull(),
+});
+
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const passkeys = sqliteTable("passkeys", {
+  id: text("id").primaryKey(), // base64url credential ID
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  publicKey: text("public_key").notNull(), // base64 encoded COSE public key
+  counter: integer("counter").notNull().default(0),
+  transports: text("transports").notNull().default("[]"),
+  deviceName: text("device_name").notNull().default("Passkey"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const webauthnChallenges = sqliteTable("webauthn_challenges", {
+  id: text("id").primaryKey(),
+  challenge: text("challenge").notNull(),
+  userId: text("user_id"),
+  purpose: text("purpose").notNull(), // "register" | "login"
+  expiresAt: text("expires_at").notNull(),
+});
+
+export const projectMembers = sqliteTable("project_members", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("member"), // "owner" | "admin" | "member" | "viewer"
+  createdAt: text("created_at").notNull(),
+});
+
+export const projectInvitations = sqliteTable("project_invitations", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  role: text("role").notNull().default("member"),
+  token: text("token").notNull().unique(),
+  invitedByUserId: text("invited_by_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: text("expires_at").notNull(),
+  acceptedAt: text("accepted_at"),
+  createdAt: text("created_at").notNull(),
+});

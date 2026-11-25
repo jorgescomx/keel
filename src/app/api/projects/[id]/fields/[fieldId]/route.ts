@@ -12,6 +12,7 @@ import {
   VALID_CUSTOM_FIELD_TYPES,
 } from "@/lib/api";
 import type { CustomFieldType } from "@/types";
+import { requireProjectAccess } from "@/lib/auth";
 
 type Params = { params: Promise<{ id: string; fieldId: string }> };
 
@@ -22,6 +23,9 @@ export async function PATCH(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id: projectId, fieldId } = await params;
+
+  const access = await requireProjectAccess(projectId, "admin");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select()
@@ -90,6 +94,9 @@ export async function DELETE(req: Request, { params }: Params) {
   if (originError) return originError;
 
   const { id: projectId, fieldId } = await params;
+
+  const access = await requireProjectAccess(projectId, "admin");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select({ id: customFields.id })

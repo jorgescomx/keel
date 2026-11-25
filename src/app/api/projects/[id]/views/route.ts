@@ -10,6 +10,8 @@ import {
   sanitizeStringArray,
   sanitizeViewFilters,
 } from "@/lib/api";
+import { requireProjectAccess } from "@/lib/auth";
+import { encryptString } from "@/lib/crypto";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -20,6 +22,9 @@ export async function POST(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id: projectId } = await params;
+
+  const access = await requireProjectAccess(projectId, "member");
+  if (!access.ok) return access.response;
 
   const [project] = await db
     .select({ id: projects.id })
@@ -63,7 +68,7 @@ export async function POST(req: Request, { params }: Params) {
     projectId,
     name,
     layout: body.layout === "list" ? "list" : "board",
-    query,
+    query: encryptString(query),
     filters: JSON.stringify(filters),
     hiddenStatusIds: JSON.stringify(hiddenStatusIds),
     swimlaneBy,

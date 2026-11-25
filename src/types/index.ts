@@ -124,8 +124,45 @@ export interface ProjectView {
   position: number;
 }
 
+export type ProjectRole = "owner" | "admin" | "member" | "viewer";
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  isMasterAdmin: boolean;
+  createdAt: string;
+}
+
+export interface PasskeyInfo {
+  id: string;
+  deviceName: string;
+  createdAt: string;
+}
+
+export interface ProjectMember {
+  id: string;
+  projectId: string;
+  userId: string;
+  email: string;
+  name: string;
+  role: ProjectRole;
+  createdAt: string;
+}
+
+export interface ProjectInvitation {
+  id: string;
+  projectId: string;
+  email: string;
+  role: ProjectRole;
+  token: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface ProjectBundle {
   project: Project;
+  myRole: ProjectRole;
   itemTypes: ItemType[];
   statuses: StatusColumn[];
   customFields: CustomFieldDef[];

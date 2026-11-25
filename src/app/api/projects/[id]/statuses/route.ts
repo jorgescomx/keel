@@ -12,6 +12,7 @@ import {
   VALID_STATUS_CATEGORIES,
 } from "@/lib/api";
 import type { StatusCategory } from "@/types";
+import { requireProjectAccess } from "@/lib/auth";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -22,6 +23,9 @@ export async function POST(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id: projectId } = await params;
+
+  const access = await requireProjectAccess(projectId, "admin");
+  if (!access.ok) return access.response;
 
   const [project] = await db
     .select({ id: projects.id })
@@ -84,6 +88,10 @@ export async function PUT(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id: projectId } = await params;
+
+  const access = await requireProjectAccess(projectId, "admin");
+  if (!access.ok) return access.response;
+
   const orderedIds = sanitizeStringArray(body.orderedIds, 100, 64) ?? [];
 
   await db.transaction(async (tx) => {

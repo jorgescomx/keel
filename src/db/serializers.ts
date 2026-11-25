@@ -14,6 +14,7 @@ import {
   type ProjectView,
   type ViewFilters,
 } from "@/types";
+import { decryptString } from "@/lib/crypto";
 import type {
   projects,
   itemTypes,
@@ -39,7 +40,7 @@ export function serializeProject(row: typeof projects.$inferSelect): Project {
     id: row.id,
     name: row.name,
     key: row.key,
-    description: row.description,
+    description: decryptString(row.description),
     icon: row.icon,
     color: row.color,
     itemCounter: row.itemCounter,
@@ -97,20 +98,21 @@ export function serializeCustomField(
 }
 
 export function serializeItem(row: typeof items.$inferSelect): WorkItem {
+  const decryptedCf = decryptString(row.customFields);
   return {
     id: row.id,
     projectId: row.projectId,
     key: row.key,
     number: row.number,
-    title: row.title,
-    description: row.description,
+    title: decryptString(row.title),
+    description: decryptString(row.description),
     typeId: row.typeId,
     statusId: row.statusId,
     priority: row.priority as Priority,
     parentId: row.parentId ?? null,
     labels: safeJsonParse<string[]>(row.labels, []),
     dueDate: row.dueDate ?? null,
-    customFields: safeJsonParse<Record<string, unknown>>(row.customFields, {}),
+    customFields: safeJsonParse<Record<string, unknown>>(decryptedCf, {}),
     position: row.position,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -122,7 +124,7 @@ export function serializeComment(row: typeof comments.$inferSelect): ItemComment
     id: row.id,
     itemId: row.itemId,
     author: row.author,
-    body: row.body,
+    body: decryptString(row.body),
     createdAt: row.createdAt,
   };
 }
@@ -133,7 +135,7 @@ export function serializeView(row: typeof views.$inferSelect): ProjectView {
     projectId: row.projectId,
     name: row.name,
     layout: row.layout === "list" ? "list" : "board",
-    query: row.query ?? "",
+    query: decryptString(row.query ?? ""),
     filters: safeJsonParse<ViewFilters>(row.filters, {}),
     hiddenStatusIds: safeJsonParse<string[]>(row.hiddenStatusIds, []),
     swimlaneBy: row.swimlaneBy ?? "none",

@@ -11,6 +11,7 @@ import {
   VALID_STATUS_CATEGORIES,
 } from "@/lib/api";
 import type { StatusCategory } from "@/types";
+import { requireProjectAccess } from "@/lib/auth";
 
 type Params = { params: Promise<{ id: string; statusId: string }> };
 
@@ -21,6 +22,9 @@ export async function PATCH(req: Request, { params }: Params) {
   const body = parsed.data;
 
   const { id: projectId, statusId } = await params;
+
+  const access = await requireProjectAccess(projectId, "admin");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select()
@@ -79,6 +83,9 @@ export async function DELETE(req: Request, { params }: Params) {
   if (originError) return originError;
 
   const { id: projectId, statusId } = await params;
+
+  const access = await requireProjectAccess(projectId, "admin");
+  if (!access.ok) return access.response;
 
   const [existing] = await db
     .select({ id: statuses.id })
