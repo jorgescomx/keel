@@ -16,6 +16,8 @@ function loadOrCreateEncryptionKey(): Buffer {
 
   if (!hex) {
     const envLocalPath = path.join(process.cwd(), ".env.local");
+    const dataKeyPath = path.join(process.cwd(), "data", ".keel-key");
+
     if (fs.existsSync(envLocalPath)) {
       const content = fs.readFileSync(envLocalPath, "utf8");
       const match = content.match(/^KEEL_ENCRYPTION_KEY\s*=\s*([0-9a-fA-F]{64})\s*$/m);
@@ -24,11 +26,24 @@ function loadOrCreateEncryptionKey(): Buffer {
       }
     }
 
+    if (!hex && fs.existsSync(dataKeyPath)) {
+      const saved = fs.readFileSync(dataKeyPath, "utf8").trim();
+      if (/^[0-9a-fA-F]{64}$/.test(saved)) {
+        hex = saved;
+      }
+    }
+
     if (!hex) {
       hex = crypto.randomBytes(32).toString("hex");
-      const line = `\n# Auto-generated AES-256-GCM encryption key for Keel data at rest\n${KEY_ENV_NAME}=${hex}\n`;
       try {
-        fs.appendFileSync(envLocalPath, line, { mode: 0o600 });
+        if (process.env.NODE_ENV === "production") {
+          // Persist inside the mounted /app/data volume so container updates keep the key
+          fs.mkdirSync(path.dirname(dataKeyPath), { recursive: true });
+          fs.writeFileSync(dataKeyPath, `${hex}\n`, { mode: 0o600 });
+        } else {
+          const line = `\n# Auto-generated AES-256-GCM encryption key for Keel data at rest\n${KEY_ENV_NAME}=${hex}\n`;
+          fs.appendFileSync(envLocalPath, line, { mode: 0o600 });
+        }
       } catch {
         // Fallback: keep in memory for this process
       }

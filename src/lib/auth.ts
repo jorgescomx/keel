@@ -28,16 +28,20 @@ export function hasMinRole(role: ProjectRole, minRole: ProjectRole): boolean {
 }
 
 async function isHttpsRequest(): Promise<boolean> {
+  if (process.env.KEEL_COOKIE_SECURE === "true") return true;
+  if (process.env.KEEL_COOKIE_SECURE === "false") return false;
   try {
     const h = await headers();
     const proto = h.get("x-forwarded-proto");
     if (proto) return proto.split(",")[0].trim() === "https";
     const origin = h.get("origin");
     if (origin) return origin.startsWith("https://");
+    const referer = h.get("referer");
+    if (referer) return referer.startsWith("https://");
   } catch {
     // ignore outside request context
   }
-  return process.env.NODE_ENV === "production";
+  return false;
 }
 
 export async function createSession(userId: string): Promise<void> {

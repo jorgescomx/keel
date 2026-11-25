@@ -1,0 +1,16 @@
+services:
+  keel:
+    image: ghcr.io/jorgescomx/keel:latest
+    container_name: keel
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # Optional: set your own 64-hex-char AES-256 key, or leave unset to auto-persist in /app/data/.keel-key
+      # - KEEL_ENCRYPTION_KEY=your_64_char_hex_key_here
+    volumes:
+      # On TrueNAS SCALE, point this to a host dataset owned by UID 1000, e.g.:
+      # - /mnt/pool/apps/keel/data:/app/data
+      - ./data:/app/data
