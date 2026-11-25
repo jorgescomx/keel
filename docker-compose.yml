@@ -1,6 +1,6 @@
 services:
   keel:
-    image: ghcr.io/jorgescomx/keel:latest
+    image: jorgesco/keel:latest
     container_name: keel
     restart: unless-stopped
     ports:
