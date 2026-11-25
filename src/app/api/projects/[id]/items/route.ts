@@ -11,6 +11,7 @@ import {
   sanitizeDueDate,
   sanitizeStringArray,
   VALID_PRIORITIES,
+  validateCustomFieldValuesForProject,
   validateItemReferences,
 } from "@/lib/api";
 import type { Priority } from "@/types";
@@ -94,6 +95,13 @@ export async function POST(req: Request, { params }: Params) {
   const labels =
     sanitizeStringArray(body.labels, LIMITS.MAX_LABELS, LIMITS.LABEL) ?? [];
   const customFieldVals = sanitizeCustomFieldValues(body.customFields) ?? {};
+  const cfError = await validateCustomFieldValuesForProject(
+    projectId,
+    customFieldVals
+  );
+  if (cfError) {
+    return NextResponse.json({ error: cfError }, { status: 400 });
+  }
   const description =
     typeof body.description === "string"
       ? body.description.slice(0, LIMITS.DESCRIPTION)

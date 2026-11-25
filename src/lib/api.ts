@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { items, itemTypes, statuses } from "@/db/schema";
+import { customFields, items, itemTypes, statuses } from "@/db/schema";
 import type {
   CustomFieldType,
   Priority,
@@ -448,6 +448,55 @@ export async function validateItemReferences(opts: {
         );
       if (childType && parentType && parentType.level >= childType.level) {
         return "Parent item must be at a higher hierarchy level";
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Validates custom field values against project-defined value-controlled
+ * (select / multi_select) option lists so rogue values are rejected server-side.
+ */
+export async function validateCustomFieldValuesForProject(
+  projectId: string,
+  values: Record<string, unknown>
+): Promise<string | null> {
+  const keys = Object.keys(values);
+  if (keys.length === 0) return null;
+
+  const defs = await db
+    .select()
+    .from(customFields)
+    .where(eq(customFields.projectId, projectId));
+  const defById = new Map(defs.map((d) => [d.id, d]));
+
+  for (const [fieldId, val] of Object.entries(values)) {
+    if (val === null || val === undefined || val === "") continue;
+    const def = defById.get(fieldId);
+    if (!def) continue;
+
+    if (def.fieldType === "select" || def.fieldType === "multi_select") {
+      let allowedIds = new Set<string>();
+      try {
+        const opts = JSON.parse(def.options) as SelectOption[];
+        allowedIds = new Set(opts.map((o) => o.id));
+      } catch {
+        allowedIds = new Set();
+      }
+
+      if (def.fieldType === "select") {
+        if (typeof val !== "string" || !allowedIds.has(val)) {
+          return `Invalid value for restricted field "${def.name}"`;
+        }
+      } else {
+        if (
+          !Array.isArray(val) ||
+          val.some((v) => typeof v !== "string" || !allowedIds.has(v))
+        ) {
+          return `Invalid value(s) for restricted field "${def.name}"`;
+        }
       }
     }
   }

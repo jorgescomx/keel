@@ -21,7 +21,8 @@ import type {
 } from "@/types";
 import { DynamicIcon, PRIORITY_LIST, PRIORITY_META, PriorityIcon } from "@/lib/icons";
 import { getValidParentCandidates } from "@/lib/hierarchy";
-import { cn } from "@/lib/utils";
+import { LabelInput } from "./LabelInput";
+import { MultiSelectDropdown } from "./MultiSelectDropdown";
 
 interface ItemDetailModalProps {
   bundle: ProjectBundle;
@@ -56,11 +57,15 @@ export function ItemDetailModal({
 
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description);
-  const [labelInput, setLabelInput] = useState("");
   const [subitemTitle, setSubitemTitle] = useState("");
   const [comments, setComments] = useState<ItemComment[]>([]);
   const [commentBody, setCommentBody] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const existingProjectLabels = useMemo(
+    () => items.flatMap((i) => i.labels),
+    [items]
+  );
 
   useEffect(() => {
     setTitle(item.title);
@@ -134,21 +139,6 @@ export function ItemDetailModal({
     }
   };
 
-  const addLabel = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleaned = labelInput.trim().toLowerCase();
-    if (!cleaned || item.labels.includes(cleaned)) {
-      setLabelInput("");
-      return;
-    }
-    onUpdateItem(item.id, { labels: [...item.labels, cleaned] });
-    setLabelInput("");
-  };
-
-  const removeLabel = (label: string) => {
-    onUpdateItem(item.id, { labels: item.labels.filter((l) => l !== label) });
-  };
-
   const updateCustomField = (fieldId: string, value: unknown) => {
     onUpdateItem(item.id, {
       customFields: { ...item.customFields, [fieldId]: value },
@@ -208,36 +198,12 @@ export function ItemDetailModal({
       case "multi_select": {
         const selected = Array.isArray(val) ? (val as string[]) : [];
         return (
-          <div className="flex flex-wrap gap-1.5">
-            {cf.options.map((o) => {
-              const active = selected.includes(o.id);
-              return (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => {
-                    const next = active
-                      ? selected.filter((x) => x !== o.id)
-                      : [...selected, o.id];
-                    updateCustomField(cf.id, next);
-                  }}
-                  className={cn(
-                    "rounded px-2 py-0.5 text-[11px] font-medium border transition-all",
-                    active
-                      ? "ring-1 ring-offset-1 dark:ring-offset-[#161922]"
-                      : "opacity-55 hover:opacity-100"
-                  )}
-                  style={{
-                    backgroundColor: active ? `${o.color}22` : "transparent",
-                    borderColor: `${o.color}60`,
-                    color: o.color,
-                  }}
-                >
-                  {o.label}
-                </button>
-              );
-            })}
-          </div>
+          <MultiSelectDropdown
+            options={cf.options}
+            value={selected}
+            onChange={(next) => updateCustomField(cf.id, next)}
+            placeholder={`Select ${cf.name.toLowerCase()}...`}
+          />
         );
       }
       case "checkbox":
@@ -673,32 +639,12 @@ export function ItemDetailModal({
                 <Tag className="h-3 w-3" />
                 Labels
               </label>
-              <div className="flex flex-wrap gap-1 mb-1.5">
-                {item.labels.map((label) => (
-                  <span
-                    key={label}
-                    className="inline-flex items-center gap-1 rounded bg-slate-200/80 dark:bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:text-slate-300"
-                  >
-                    {label}
-                    <button
-                      type="button"
-                      onClick={() => removeLabel(label)}
-                      className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <form onSubmit={addLabel}>
-                <input
-                  type="text"
-                  value={labelInput}
-                  onChange={(e) => setLabelInput(e.target.value)}
-                  placeholder="Add label & press Enter"
-                  className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                />
-              </form>
+              <LabelInput
+                value={item.labels}
+                existingLabels={existingProjectLabels}
+                onChange={(next) => onUpdateItem(item.id, { labels: next })}
+                placeholder="Add label & press Enter"
+              />
             </div>
 
             {/* Custom Fields */}

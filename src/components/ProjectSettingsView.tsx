@@ -15,6 +15,9 @@ import {
   Users,
   Copy,
   Mail,
+  Pencil,
+  X,
+  Lock,
 } from "lucide-react";
 import type {
   CustomFieldType,
@@ -77,11 +80,19 @@ export function ProjectSettingsView({
 
   // New Custom Field state
   const [newFieldName, setNewFieldName] = useState("");
-  const [newFieldType, setNewFieldType] = useState<CustomFieldType>("select");
-  const [newFieldOptionsRaw, setNewFieldOptionsRaw] = useState(
-    "Option A, Option B, Option C"
-  );
+  const [newFieldRestricted, setNewFieldRestricted] = useState(true);
+  const [newFieldMulti, setNewFieldMulti] = useState(false);
+  const [newFieldOpenType, setNewFieldOpenType] =
+    useState<CustomFieldType>("text");
+  const [newFieldOptions, setNewFieldOptions] = useState<SelectOption[]>([]);
+  const [newFieldOptionInput, setNewFieldOptionInput] = useState("");
+  const [newFieldOptionWarning, setNewFieldOptionWarning] = useState("");
   const [newFieldShowOnCard, setNewFieldShowOnCard] = useState(true);
+
+  // Inline editor for existing custom fields
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+  const [editFieldOptionInput, setEditFieldOptionInput] = useState("");
+  const [editFieldOptionWarning, setEditFieldOptionWarning] = useState("");
 
   // Members & Invitations state
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -332,37 +343,122 @@ export function ProjectSettingsView({
     }
   };
 
+  const makeOptionId = (label: string) =>
+    label
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || `opt-${Date.now()}`;
+
+  const handleAddNewFieldOption = () => {
+    const label = newFieldOptionInput.trim();
+    if (!label) return;
+    const dup = newFieldOptions.find(
+      (o) => o.label.toLowerCase() === label.toLowerCase()
+    );
+    if (dup) {
+      setNewFieldOptionWarning(
+        `"${dup.label}" already exists (case-insensitive match).`
+      );
+      return;
+    }
+    setNewFieldOptionWarning("");
+    const next: SelectOption = {
+      id: makeOptionId(label),
+      label,
+      color: COLOR_PALETTE[newFieldOptions.length % COLOR_PALETTE.length],
+    };
+    setNewFieldOptions((prev) => [...prev, next]);
+    setNewFieldOptionInput("");
+  };
+
   const handleAddField = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFieldName.trim()) return;
 
-    const options: SelectOption[] =
-      newFieldType === "select" || newFieldType === "multi_select"
-        ? newFieldOptionsRaw
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .map((label, idx) => ({
-              id: label.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-              label,
-              color: COLOR_PALETTE[idx % COLOR_PALETTE.length],
-            }))
-        : [];
+    const fieldType: CustomFieldType = newFieldRestricted
+      ? newFieldMulti
+        ? "multi_select"
+        : "select"
+      : newFieldOpenType;
+
+    // Include any pending typed option if user hit submit without pressing +
+    let finalOptions = [...newFieldOptions];
+    if (newFieldRestricted && newFieldOptionInput.trim()) {
+      const label = newFieldOptionInput.trim();
+      const dup = finalOptions.find(
+        (o) => o.label.toLowerCase() === label.toLowerCase()
+      );
+      if (!dup) {
+        finalOptions.push({
+          id: makeOptionId(label),
+          label,
+          color: COLOR_PALETTE[finalOptions.length % COLOR_PALETTE.length],
+        });
+      }
+    }
+
+    if (newFieldRestricted && finalOptions.length === 0) {
+      setNewFieldOptionWarning("Add at least one allowed value.");
+      return;
+    }
 
     await fetch(`/api/projects/${project.id}/fields`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: newFieldName.trim(),
-        fieldType: newFieldType,
-        options,
+        fieldType,
+        options: newFieldRestricted ? finalOptions : [],
         applicableTypeIds: [],
         showOnCard: newFieldShowOnCard,
       }),
     });
     setNewFieldName("");
+    setNewFieldOptions([]);
+    setNewFieldOptionInput("");
+    setNewFieldOptionWarning("");
     await onRefresh();
     flashSaved("Custom field created");
+  };
+
+  const handleAddOptionToExistingField = async (
+    fieldId: string,
+    currentOptions: SelectOption[]
+  ) => {
+    const label = editFieldOptionInput.trim();
+    if (!label) return;
+    const dup = currentOptions.find(
+      (o) => o.label.toLowerCase() === label.toLowerCase()
+    );
+    if (dup) {
+      setEditFieldOptionWarning(
+        `"${dup.label}" already exists (case-insensitive match).`
+      );
+      return;
+    }
+    setEditFieldOptionWarning("");
+    const nextOptions: SelectOption[] = [
+      ...currentOptions,
+      {
+        id: makeOptionId(label),
+        label,
+        color: COLOR_PALETTE[currentOptions.length % COLOR_PALETTE.length],
+      },
+    ];
+    setEditFieldOptionInput("");
+    await handleUpdateField(fieldId, { options: nextOptions });
+    flashSaved("Allowed value added");
+  };
+
+  const handleRemoveOptionFromExistingField = async (
+    fieldId: string,
+    currentOptions: SelectOption[],
+    optionId: string
+  ) => {
+    const nextOptions = currentOptions.filter((o) => o.id !== optionId);
+    await handleUpdateField(fieldId, { options: nextOptions });
+    flashSaved("Allowed value removed");
   };
 
   const handleUpdateField = async (
@@ -1020,84 +1116,255 @@ export function ProjectSettingsView({
         {tab === "fields" && (
           <div className="space-y-4">
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#161922] divide-y divide-slate-100 dark:divide-slate-800">
-              {customFields.map((cf) => (
-                <div
-                  key={cf.id}
-                  className="flex flex-wrap items-center justify-between gap-3 p-4"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                        {cf.name}
-                      </span>
-                      <span className="rounded bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10.5px] font-mono uppercase text-slate-500">
-                        {cf.fieldType}
-                      </span>
-                      {cf.fieldType === "select" && (
-                        <span className="rounded bg-blue-500/10 px-2 py-0.5 text-[10.5px] font-medium text-blue-600 dark:text-blue-400">
-                          Usable as Swimlane
-                        </span>
-                      )}
-                    </div>
-                    {cf.options.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {cf.options.map((o) => (
-                          <span
-                            key={o.id}
-                            className="rounded px-1.5 py-0.5 text-[10.5px] font-medium border"
-                            style={{
-                              backgroundColor: `${o.color}18`,
-                              borderColor: `${o.color}40`,
-                              color: o.color,
-                            }}
-                          >
-                            {o.label}
+              {customFields.map((cf) => {
+                const isRestricted =
+                  cf.fieldType === "select" || cf.fieldType === "multi_select";
+                const isEditing = editingFieldId === cf.id;
+
+                return (
+                  <div key={cf.id} className="p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                            {cf.name}
                           </span>
-                        ))}
+                          {isRestricted ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-indigo-500/12 border border-indigo-500/25 px-2 py-0.5 text-[10.5px] font-semibold text-indigo-600 dark:text-indigo-400">
+                              <Lock className="h-2.5 w-2.5" />
+                              {cf.fieldType === "select"
+                                ? "Dropdown · Single Value"
+                                : "Dropdown · Multi-Value"}
+                            </span>
+                          ) : (
+                            <span className="rounded bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10.5px] font-mono uppercase text-slate-500">
+                              Open · {cf.fieldType}
+                            </span>
+                          )}
+                          {cf.fieldType === "select" && (
+                            <span className="rounded bg-blue-500/10 px-2 py-0.5 text-[10.5px] font-medium text-blue-600 dark:text-blue-400">
+                              Swimlane-ready
+                            </span>
+                          )}
+                        </div>
+                        {isRestricted && cf.options.length > 0 && !isEditing && (
+                          <div className="flex flex-wrap gap-1 pt-0.5">
+                            {cf.options.map((o) => (
+                              <span
+                                key={o.id}
+                                className="rounded px-1.5 py-0.5 text-[10.5px] font-medium border"
+                                style={{
+                                  backgroundColor: `${o.color}18`,
+                                  borderColor: `${o.color}40`,
+                                  color: o.color,
+                                }}
+                              >
+                                {o.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingFieldId(isEditing ? null : cf.id);
+                            setEditFieldOptionInput("");
+                            setEditFieldOptionWarning("");
+                          }}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                            isEditing
+                              ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
+                              : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-blue-400 hover:text-blue-600"
+                          )}
+                        >
+                          <Pencil className="h-3 w-3" />
+                          {isEditing ? "Done" : "Edit Values"}
+                        </button>
+                        <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={cf.showOnCard}
+                            onChange={(e) =>
+                              handleUpdateField(cf.id, {
+                                showOnCard: e.target.checked,
+                              })
+                            }
+                            className="h-3.5 w-3.5 rounded text-blue-600"
+                          />
+                          Show on card
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteField(cf.id)}
+                          className="rounded p-1.5 text-slate-400 hover:text-red-500"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Inline editor for value restriction & options */}
+                    {isEditing && (
+                      <div className="rounded-lg border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-[#11141d] p-3.5 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                            Value Control Mode
+                          </span>
+                          <div className="inline-flex rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#161922] p-0.5 text-xs">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUpdateField(cf.id, {
+                                  fieldType: "select",
+                                })
+                              }
+                              className={cn(
+                                "rounded px-2.5 py-1 font-semibold transition-colors",
+                                cf.fieldType === "select"
+                                  ? "bg-blue-600 text-white"
+                                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                              )}
+                            >
+                              Single Value Dropdown
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUpdateField(cf.id, {
+                                  fieldType: "multi_select",
+                                })
+                              }
+                              className={cn(
+                                "rounded px-2.5 py-1 font-semibold transition-colors",
+                                cf.fieldType === "multi_select"
+                                  ? "bg-blue-600 text-white"
+                                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                              )}
+                            >
+                              Multi-Value Dropdown
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUpdateField(cf.id, { fieldType: "text" })
+                              }
+                              className={cn(
+                                "rounded px-2.5 py-1 font-semibold transition-colors",
+                                !isRestricted
+                                  ? "bg-slate-700 text-white"
+                                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                              )}
+                            >
+                              Open / Free-form
+                            </button>
+                          </div>
+                        </div>
+
+                        {isRestricted && (
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap gap-1.5">
+                              {cf.options.map((o) => (
+                                <span
+                                  key={o.id}
+                                  className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium border"
+                                  style={{
+                                    backgroundColor: `${o.color}18`,
+                                    borderColor: `${o.color}48`,
+                                    color: o.color,
+                                  }}
+                                >
+                                  {o.label}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRemoveOptionFromExistingField(
+                                        cf.id,
+                                        cf.options,
+                                        o.id
+                                      )
+                                    }
+                                    className="hover:opacity-75"
+                                    title={`Remove "${o.label}"`}
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              ))}
+                              {cf.options.length === 0 && (
+                                <span className="text-xs text-slate-400">
+                                  No allowed values yet—add one below.
+                                </span>
+                              )}
+                            </div>
+
+                            {editFieldOptionWarning && (
+                              <div className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                                {editFieldOptionWarning}
+                              </div>
+                            )}
+
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={editFieldOptionInput}
+                                onChange={(e) => {
+                                  setEditFieldOptionInput(e.target.value);
+                                  setEditFieldOptionWarning("");
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    handleAddOptionToExistingField(
+                                      cf.id,
+                                      cf.options
+                                    );
+                                  }
+                                }}
+                                placeholder="Add allowed value & press Enter..."
+                                className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#161922] px-2.5 py-1 text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleAddOptionToExistingField(
+                                    cf.id,
+                                    cf.options
+                                  )
+                                }
+                                className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                                Add Value
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-
-                  <div className="flex items-center gap-4">
-                    <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={cf.showOnCard}
-                        onChange={(e) =>
-                          handleUpdateField(cf.id, {
-                            showOnCard: e.target.checked,
-                          })
-                        }
-                        className="h-3.5 w-3.5 rounded text-blue-600"
-                      />
-                      Show on card
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteField(cf.id)}
-                      className="rounded p-1.5 text-slate-400 hover:text-red-500"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
               {customFields.length === 0 && (
                 <div className="p-6 text-center text-xs text-slate-500">
-                  No custom fields yet. Add one below (Select fields can also be
-                  used as Kanban Swimlanes!).
+                  No custom fields yet. Add a value-controlled dropdown or open
+                  field below.
                 </div>
               )}
             </div>
 
             <form
               onSubmit={handleAddField}
-              className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-[#161922]/70 p-4 space-y-3"
+              className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-[#161922]/70 p-4 space-y-4"
             >
               <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
                 Add Custom Field
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                     Field Name *
@@ -1107,23 +1374,157 @@ export function ProjectSettingsView({
                     required
                     value={newFieldName}
                     onChange={(e) => setNewFieldName(e.target.value)}
-                    placeholder="e.g. Component, Effort, Client"
+                    placeholder="e.g. Component, Environment, Effort"
                     className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs"
                   />
                 </div>
+
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                    Field Type
+                    Value Control
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setNewFieldRestricted(true)}
+                      className={cn(
+                        "inline-flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors",
+                        newFieldRestricted
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
+                          : "border-slate-200 dark:border-slate-700 text-slate-500"
+                      )}
+                    >
+                      <Lock className="h-3 w-3" />
+                      Restricted (Dropdown)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewFieldRestricted(false)}
+                      className={cn(
+                        "rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors",
+                        !newFieldRestricted
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
+                          : "border-slate-200 dark:border-slate-700 text-slate-500"
+                      )}
+                    >
+                      Open / Free-form
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {newFieldRestricted ? (
+                <div className="rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-[#11141d] p-3.5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-slate-500">
+                      Selection Mode
+                    </span>
+                    <div className="inline-flex rounded-md border border-slate-200 dark:border-slate-700 p-0.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setNewFieldMulti(false)}
+                        className={cn(
+                          "rounded px-2.5 py-1 font-semibold transition-colors",
+                          !newFieldMulti
+                            ? "bg-blue-600 text-white"
+                            : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                        )}
+                      >
+                        Single Value (Swimlane-ready)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewFieldMulti(true)}
+                        className={cn(
+                          "rounded px-2.5 py-1 font-semibold transition-colors",
+                          newFieldMulti
+                            ? "bg-blue-600 text-white"
+                            : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                        )}
+                      >
+                        Multi-Value
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">
+                      Allowed Values (users can only pick from this dropdown)
+                    </label>
+                    {newFieldOptions.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {newFieldOptions.map((o) => (
+                          <span
+                            key={o.id}
+                            className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium border"
+                            style={{
+                              backgroundColor: `${o.color}18`,
+                              borderColor: `${o.color}48`,
+                              color: o.color,
+                            }}
+                          >
+                            {o.label}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setNewFieldOptions((prev) =>
+                                  prev.filter((x) => x.id !== o.id)
+                                )
+                              }
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {newFieldOptionWarning && (
+                      <div className="mb-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                        {newFieldOptionWarning}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newFieldOptionInput}
+                        onChange={(e) => {
+                          setNewFieldOptionInput(e.target.value);
+                          setNewFieldOptionWarning("");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddNewFieldOption();
+                          }
+                        }}
+                        placeholder="Type an allowed value & press Enter (e.g. Production, Staging)"
+                        className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#161922] px-2.5 py-1.5 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddNewFieldOption}
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-blue-400 hover:text-blue-600"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                    Open Field Type
                   </label>
                   <select
-                    value={newFieldType}
+                    value={newFieldOpenType}
                     onChange={(e) =>
-                      setNewFieldType(e.target.value as CustomFieldType)
+                      setNewFieldOpenType(e.target.value as CustomFieldType)
                     }
-                    className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs"
+                    className="w-full sm:w-56 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs"
                   >
-                    <option value="select">Single Select (Swimlane-ready)</option>
-                    <option value="multi_select">Multi-Select</option>
                     <option value="text">Text</option>
                     <option value="number">Number</option>
                     <option value="date">Date</option>
@@ -1131,42 +1532,27 @@ export function ProjectSettingsView({
                     <option value="url">URL</option>
                   </select>
                 </div>
-                <div className="flex items-end pb-1">
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newFieldShowOnCard}
-                      onChange={(e) => setNewFieldShowOnCard(e.target.checked)}
-                      className="h-4 w-4 rounded text-blue-600"
-                    />
-                    Show on Kanban cards
-                  </label>
-                </div>
-              </div>
-
-              {(newFieldType === "select" ||
-                newFieldType === "multi_select") && (
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                    Options (comma separated)
-                  </label>
-                  <input
-                    type="text"
-                    value={newFieldOptionsRaw}
-                    onChange={(e) => setNewFieldOptionsRaw(e.target.value)}
-                    placeholder="Frontend, Backend, Mobile, Ops"
-                    className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs"
-                  />
-                </div>
               )}
 
-              <button
-                type="submit"
-                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add Custom Field
-              </button>
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newFieldShowOnCard}
+                    onChange={(e) => setNewFieldShowOnCard(e.target.checked)}
+                    className="h-4 w-4 rounded text-blue-600"
+                  />
+                  Show on Kanban cards
+                </label>
+
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Custom Field
+                </button>
+              </div>
             </form>
           </div>
         )}
