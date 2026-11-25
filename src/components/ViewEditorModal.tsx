@@ -1,8 +1,20 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { X, Columns3, List, Trash2, Sparkles, AlertCircle, CheckCircle2 } from "lucide-react";
-import type { ProjectBundle, ProjectView } from "@/types";
+import {
+  X,
+  Columns3,
+  List,
+  Trash2,
+  Sparkles,
+  AlertCircle,
+  CheckCircle2,
+  Plus,
+  ArrowUp,
+  ArrowDown,
+} from "lucide-react";
+import type { CustomSwimline, ProjectBundle, ProjectView } from "@/types";
+import { COLOR_PALETTE } from "@/lib/icons";
 import { compileQuery } from "@/lib/query";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +26,7 @@ interface ViewEditorModalProps {
     query: string;
     hiddenStatusIds: string[];
     swimlaneBy: string;
+    customSwimlines?: CustomSwimline[];
     compact: boolean;
   };
   canDelete: boolean;
@@ -45,12 +58,57 @@ export function ViewEditorModal({
     editingView?.hiddenStatusIds ?? initialDraft?.hiddenStatusIds ?? []
   );
   const [swimlaneBy, setSwimlaneBy] = useState(
-    editingView?.swimlaneBy ?? initialDraft?.swimlaneBy ?? "none"
+    initialDraft?.swimlaneBy ?? editingView?.swimlaneBy ?? "none"
+  );
+  const [customSwimlines, setCustomSwimlines] = useState<CustomSwimline[]>(
+    initialDraft?.customSwimlines ??
+      editingView?.filters?.customSwimlines ??
+      []
   );
   const [compact, setCompact] = useState(
     editingView?.compact ?? initialDraft?.compact ?? false
   );
   const [submitting, setSubmitting] = useState(false);
+
+  const addCustomSwimline = (preset?: {
+    name: string;
+    query: string;
+    color: string;
+  }) => {
+    setCustomSwimlines((prev) => [
+      ...prev,
+      {
+        id: `sl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: preset?.name ?? `Swimline ${prev.length + 1}`,
+        query: preset?.query ?? "",
+        color: preset?.color ?? COLOR_PALETTE[prev.length % COLOR_PALETTE.length],
+      },
+    ]);
+  };
+
+  const updateCustomSwimline = (
+    laneId: string,
+    patch: Partial<CustomSwimline>
+  ) => {
+    setCustomSwimlines((prev) =>
+      prev.map((l) => (l.id === laneId ? { ...l, ...patch } : l))
+    );
+  };
+
+  const moveCustomSwimline = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= customSwimlines.length) return;
+    setCustomSwimlines((prev) => {
+      const copy = [...prev];
+      const [moved] = copy.splice(index, 1);
+      copy.splice(target, 0, moved);
+      return copy;
+    });
+  };
+
+  const removeCustomSwimline = (laneId: string) => {
+    setCustomSwimlines((prev) => prev.filter((l) => l.id !== laneId));
+  };
 
   const selectFields = useMemo(
     () => customFields.filter((cf) => cf.fieldType === "select"),
@@ -114,6 +172,10 @@ export function ViewEditorModal({
           name: name.trim(),
           layout,
           query: query.trim(),
+          filters: {
+            ...(editingView?.filters ?? {}),
+            customSwimlines: customSwimlines.filter((l) => l.name.trim()),
+          },
           hiddenStatusIds,
           swimlaneBy,
           compact,
@@ -296,11 +358,11 @@ export function ViewEditorModal({
                 </div>
               </div>
 
-              {/* Default Swimlane + Density */}
+              {/* Default Swimline + Density */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                    Default Swimlanes
+                    Default Swimlines
                   </label>
                   <select
                     value={swimlaneBy}
@@ -310,7 +372,9 @@ export function ViewEditorModal({
                     <option value="none">None</option>
                     <option value="priority">Priority</option>
                     <option value="type">Item Type</option>
+                    <option value="owner">Owner</option>
                     <option value="parent">Parent Item</option>
+                    <option value="custom">Custom Queries</option>
                     {selectFields.map((cf) => (
                       <option key={cf.id} value={`cf:${cf.id}`}>
                         {cf.name} (Custom)
@@ -331,6 +395,154 @@ export function ViewEditorModal({
                   </label>
                 </div>
               </div>
+
+              {/* Custom Query Swimlines Builder */}
+              {swimlaneBy === "custom" && (
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-[#11141d] p-3.5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                        Custom Query Swimlines
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Evaluated top-to-bottom (first match wins). Unmatched
+                        cards go to &ldquo;Everything Else&rdquo;.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          addCustomSwimline({
+                            name: "Expedite",
+                            query: "priority = urgent",
+                            color: "#ef4444",
+                          })
+                        }
+                        className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#161922] px-2 py-1 text-[10.5px] font-semibold text-slate-600 dark:text-slate-300 hover:border-red-400 hover:text-red-500"
+                      >
+                        + Expedite
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addCustomSwimline()}
+                        className="inline-flex items-center gap-1 rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-blue-700"
+                      >
+                        <Plus className="h-3 w-3" />
+                        Add Swimline
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {customSwimlines.map((lane, idx) => {
+                      const check = compileQuery(lane.query, {
+                        itemTypes,
+                        statuses,
+                        customFields,
+                        allItems: items,
+                      });
+                      const laneMatches =
+                        lane.query.trim() && check.ok
+                          ? items.filter(check.matches).length
+                          : null;
+
+                      return (
+                        <div
+                          key={lane.id}
+                          className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#161922] p-2.5 space-y-1.5"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="flex flex-col">
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={() => moveCustomSwimline(idx, -1)}
+                                className="text-slate-400 hover:text-slate-700 disabled:opacity-25"
+                              >
+                                <ArrowUp className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === customSwimlines.length - 1}
+                                onClick={() => moveCustomSwimline(idx, 1)}
+                                className="text-slate-400 hover:text-slate-700 disabled:opacity-25"
+                              >
+                                <ArrowDown className="h-3 w-3" />
+                              </button>
+                            </div>
+                            <input
+                              type="color"
+                              value={lane.color}
+                              onChange={(e) =>
+                                updateCustomSwimline(lane.id, {
+                                  color: e.target.value,
+                                })
+                              }
+                              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent shrink-0"
+                            />
+                            <input
+                              type="text"
+                              value={lane.name}
+                              onChange={(e) =>
+                                updateCustomSwimline(lane.id, {
+                                  name: e.target.value,
+                                })
+                              }
+                              placeholder="Swimline name"
+                              className="w-36 rounded border border-slate-200 dark:border-slate-700 bg-transparent px-2 py-1 text-xs font-semibold"
+                            />
+                            <input
+                              type="text"
+                              value={lane.query}
+                              onChange={(e) =>
+                                updateCustomSwimline(lane.id, {
+                                  query: e.target.value,
+                                })
+                              }
+                              placeholder="e.g. priority = urgent OR label = blocker"
+                              className={cn(
+                                "flex-1 min-w-0 rounded border bg-transparent px-2 py-1 font-mono text-[11px] focus:outline-none",
+                                lane.query.trim() && !check.ok
+                                  ? "border-red-400"
+                                  : "border-slate-200 dark:border-slate-700"
+                              )}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeCustomSwimline(lane.id)}
+                              className="rounded p-1 text-slate-400 hover:text-red-500"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          {lane.query.trim() && (
+                            <div className="pl-12 text-[10.5px]">
+                              {check.ok ? (
+                                <span className="text-emerald-600 dark:text-emerald-400">
+                                  Matches {laneMatches} item
+                                  {laneMatches === 1 ? "" : "s"}
+                                </span>
+                              ) : (
+                                <span className="text-red-500">
+                                  {check.error}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {customSwimlines.length === 0 && (
+                      <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-700 p-4 text-center text-xs text-slate-400">
+                        No custom swimlines yet. Click <strong>+ Expedite</strong>{" "}
+                        or <strong>+ Add Swimline</strong> above.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
 

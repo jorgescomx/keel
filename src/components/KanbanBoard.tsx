@@ -21,6 +21,7 @@ import {
 import { ChevronDown, ChevronRight, Plus, EyeOff, Check, X } from "lucide-react";
 import type {
   CustomFieldDef,
+  CustomSwimline,
   ItemType,
   Priority,
   ProjectBundle,
@@ -28,6 +29,7 @@ import type {
   WorkItem,
 } from "@/types";
 import { DynamicIcon, PRIORITY_LIST, PRIORITY_META, PriorityIcon } from "@/lib/icons";
+import { compileQuery } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { KanbanCard } from "./KanbanCard";
 
@@ -45,12 +47,14 @@ interface KanbanBoardProps {
   bundle: ProjectBundle;
   filteredItems: WorkItem[];
   visibleStatuses: StatusColumn[];
-  swimlaneBy: string; // "none" | "priority" | "type" | "parent" | `cf:${id}`
+  swimlaneBy: string; // "none" | "priority" | "type" | "parent" | "custom" | `cf:${id}`
+  customSwimlines?: CustomSwimline[];
   compact: boolean;
   onSelectItem: (item: WorkItem) => void;
   onQuickCreate: (defaults: {
     statusId: string;
     priority?: Priority;
+    ownerId?: string | null;
     typeId?: string;
     parentId?: string | null;
     customFields?: Record<string, unknown>;
@@ -114,6 +118,7 @@ export function KanbanBoard({
   filteredItems,
   visibleStatuses,
   swimlaneBy,
+  customSwimlines = [],
   compact,
   onSelectItem,
   onQuickCreate,
@@ -122,7 +127,7 @@ export function KanbanBoard({
   onRenameColumn,
   onHideColumn,
 }: KanbanBoardProps) {
-  const { project, itemTypes, customFields, items } = bundle;
+  const { project, itemTypes, customFields, items, members } = bundle;
   const statuses = visibleStatuses;
   const [activeId, setActiveId] = useState<string | null>(null);
   const [collapsedLanes, setCollapsedLanes] = useState<Record<string, boolean>>(
@@ -165,6 +170,11 @@ export function KanbanBoard({
   const itemMap = useMemo(
     () => new Map<string, WorkItem>(items.map((i) => [i.id, i])),
     [items]
+  );
+
+  const memberByUserId = useMemo(
+    () => new Map((members ?? []).map((m) => [m.userId, m])),
+    [members]
   );
 
   const subitemCounts = useMemo(() => {
@@ -212,6 +222,24 @@ export function KanbanBoard({
       }));
     }
 
+    if (swimlaneBy === "owner") {
+      const lanes: SwimlaneDef[] = (members ?? []).map((m) => ({
+        id: `owner-${m.userId}`,
+        label: m.name,
+        color: "#3b82f6",
+        matches: (item) => item.ownerId === m.userId,
+        patchOnDrop: () => ({ ownerId: m.userId }),
+      }));
+      lanes.push({
+        id: "owner-unassigned",
+        label: "Unassigned",
+        color: "#64748b",
+        matches: (item) => !item.ownerId,
+        patchOnDrop: () => ({ ownerId: null }),
+      });
+      return lanes;
+    }
+
     if (swimlaneBy === "parent") {
       // Find all items that have children
       const parentIds = new Set<string>();
@@ -235,6 +263,49 @@ export function KanbanBoard({
         matches: (item) => !item.parentId || !parentIds.has(item.parentId),
         patchOnDrop: () => ({ parentId: null }),
       });
+      return lanes;
+    }
+
+    if (swimlaneBy === "custom") {
+      const ctx = {
+        itemTypes,
+        statuses: bundle.statuses,
+        customFields,
+        allItems: items,
+        members,
+      };
+      const compiled = customSwimlines.map((lane) => ({
+        lane,
+        res: compileQuery(lane.query, ctx),
+      }));
+
+      // First-match-wins (top-to-bottom), just like Jira's Query Swimlines
+      const assignedLaneByItemId = new Map<string, string>();
+      for (const item of filteredItems) {
+        for (const { lane, res } of compiled) {
+          if (lane.query.trim() && res.ok && res.matches(item)) {
+            assignedLaneByItemId.set(item.id, lane.id);
+            break;
+          }
+        }
+      }
+
+      const lanes: SwimlaneDef[] = customSwimlines.map((lane) => ({
+        id: `custom-${lane.id}`,
+        label: lane.name,
+        color: lane.color,
+        matches: (item) => assignedLaneByItemId.get(item.id) === lane.id,
+        patchOnDrop: () => ({}),
+      }));
+
+      lanes.push({
+        id: "custom-other",
+        label: "Everything Else",
+        color: "#64748b",
+        matches: (item) => !assignedLaneByItemId.has(item.id),
+        patchOnDrop: () => ({}),
+      });
+
       return lanes;
     }
 
@@ -276,7 +347,17 @@ export function KanbanBoard({
         patchOnDrop: () => ({}),
       },
     ];
-  }, [swimlaneBy, itemTypes, items, typeMap, customFields, project.settings.defaultNounPlural]);
+  }, [
+    swimlaneBy,
+    customSwimlines,
+    itemTypes,
+    bundle.statuses,
+    items,
+    filteredItems,
+    typeMap,
+    customFields,
+    project.settings.defaultNounPlural,
+  ]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -376,6 +457,7 @@ export function KanbanBoard({
     return {
       statusId: status.id,
       priority: patch.priority,
+      ownerId: patch.ownerId,
       typeId: patch.typeId,
       parentId: patch.parentId,
       customFields: patch.customFields,
@@ -607,6 +689,11 @@ export function KanbanBoard({
                                   key={item.id}
                                   item={item}
                                   itemType={typeMap.get(item.typeId)}
+                                  owner={
+                                    item.ownerId
+                                      ? memberByUserId.get(item.ownerId)
+                                      : undefined
+                                  }
                                   parentItem={
                                     item.parentId
                                       ? itemMap.get(item.parentId)
@@ -638,6 +725,11 @@ export function KanbanBoard({
             <KanbanCard
               item={activeItem}
               itemType={typeMap.get(activeItem.typeId)}
+              owner={
+                activeItem.ownerId
+                  ? memberByUserId.get(activeItem.ownerId)
+                  : undefined
+              }
               parentItem={
                 activeItem.parentId
                   ? itemMap.get(activeItem.parentId)

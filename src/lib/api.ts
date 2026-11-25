@@ -298,6 +298,9 @@ export function mergeProjectSettings(
     if (typeof cf.showParent === "boolean") {
       nextCardFields.showParent = cf.showParent;
     }
+    if (typeof cf.showOwner === "boolean") {
+      nextCardFields.showOwner = cf.showOwner;
+    }
   }
 
   return {
@@ -340,6 +343,72 @@ export function sanitizeViewFilters(raw: unknown): ViewFilters {
 
   const labels = sanitizeStringArray(raw.labels, LIMITS.MAX_LABELS, LIMITS.LABEL);
   if (labels && labels.length > 0) out.labels = labels;
+
+  if (Array.isArray(raw.customSwimlines)) {
+    const lanes = [];
+    for (const entry of raw.customSwimlines.slice(0, 25)) {
+      if (!isPlainObject(entry)) continue;
+      const id =
+        typeof entry.id === "string" && entry.id.trim()
+          ? entry.id.trim().slice(0, 64)
+          : "";
+      const name =
+        typeof entry.name === "string"
+          ? entry.name.trim().slice(0, LIMITS.NAME)
+          : "";
+      const query =
+        typeof entry.query === "string"
+          ? entry.query.trim().slice(0, LIMITS.QUERY)
+          : "";
+      if (!id || !name) continue;
+      lanes.push({
+        id,
+        name,
+        query,
+        color: sanitizeColor(entry.color, "#3b82f6"),
+      });
+    }
+    if (lanes.length > 0) out.customSwimlines = lanes;
+  }
+
+  if (Array.isArray(raw.quickFilters)) {
+    const qfs = [];
+    for (const entry of raw.quickFilters.slice(0, 20)) {
+      if (!isPlainObject(entry)) continue;
+      const id =
+        typeof entry.id === "string" && entry.id.trim()
+          ? entry.id.trim().slice(0, 64)
+          : "";
+      const label =
+        typeof entry.label === "string"
+          ? entry.label.trim().slice(0, 60)
+          : "";
+      if (!id || !label) continue;
+
+      if (entry.kind === "field" && typeof entry.fieldKey === "string") {
+        const fk = entry.fieldKey.trim();
+        if (fk === "owner" || fk === "labels" || fk.startsWith("cf:")) {
+          qfs.push({
+            id,
+            kind: "field" as const,
+            label,
+            fieldKey: fk as "owner" | "labels" | `cf:${string}`,
+          });
+        }
+      } else if (entry.kind === "query" && typeof entry.query === "string") {
+        const query = entry.query.trim().slice(0, LIMITS.QUERY);
+        if (query) {
+          qfs.push({
+            id,
+            kind: "query" as const,
+            label,
+            query,
+          });
+        }
+      }
+    }
+    if (qfs.length > 0) out.quickFilters = qfs;
+  }
 
   return out;
 }

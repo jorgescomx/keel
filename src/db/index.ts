@@ -125,6 +125,7 @@ async function initTables() {
       type_id TEXT NOT NULL REFERENCES item_types(id),
       status_id TEXT NOT NULL REFERENCES statuses(id),
       priority TEXT NOT NULL DEFAULT 'medium',
+      owner_id TEXT,
       parent_id TEXT,
       labels TEXT NOT NULL DEFAULT '[]',
       due_date TEXT,
@@ -134,6 +135,13 @@ async function initTables() {
       updated_at TEXT NOT NULL
     );
   `);
+
+  // Safe migration for existing databases created before items.owner_id existed
+  try {
+    await client.execute(`ALTER TABLE items ADD COLUMN owner_id TEXT;`);
+  } catch {
+    // Column already exists
+  }
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS comments (

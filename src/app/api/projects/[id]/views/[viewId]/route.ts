@@ -46,7 +46,9 @@ export async function PATCH(req: Request, { params }: Params) {
     patch.query = encryptString(body.query.slice(0, LIMITS.QUERY));
   }
   if (body.filters && typeof body.filters === "object") {
-    patch.filters = JSON.stringify(sanitizeViewFilters(body.filters));
+    patch.filters = encryptString(
+      JSON.stringify(sanitizeViewFilters(body.filters))
+    );
   }
   if (Array.isArray(body.hiddenStatusIds)) {
     const ids = sanitizeStringArray(body.hiddenStatusIds, 100, 64);

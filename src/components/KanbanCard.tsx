@@ -7,6 +7,7 @@ import { Calendar, GitBranch, CornerDownRight, Check } from "lucide-react";
 import type {
   CustomFieldDef,
   ItemType,
+  ProjectMember,
   ProjectSettings,
   WorkItem,
 } from "@/types";
@@ -16,6 +17,7 @@ import { cn, formatShortDate, isOverdue } from "@/lib/utils";
 interface KanbanCardProps {
   item: WorkItem;
   itemType?: ItemType;
+  owner?: ProjectMember;
   parentItem?: WorkItem;
   subitemCount: number;
   customFields: CustomFieldDef[];
@@ -28,6 +30,7 @@ interface KanbanCardProps {
 export function KanbanCard({
   item,
   itemType,
+  owner,
   parentItem,
   subitemCount,
   customFields,
@@ -242,6 +245,15 @@ export function KanbanCard({
           {cardFields.showPriority && (
             <span title={`Priority: ${item.priority}`}>
               <PriorityIcon priority={item.priority} className="h-3.5 w-3.5" />
+            </span>
+          )}
+
+          {cardFields.showOwner && owner && (
+            <span
+              title={`Owner: ${owner.name}`}
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600/15 text-[10px] font-bold text-blue-700 dark:text-blue-300 border border-blue-500/25 shrink-0"
+            >
+              {owner.name.slice(0, 1).toUpperCase()}
             </span>
           )}
         </div>

@@ -8,6 +8,7 @@ import {
   customFields,
   items,
   projectMembers,
+  users,
 } from "@/db/schema";
 import {
   serializeProject,
@@ -50,7 +51,7 @@ export default async function HomePage() {
     const first = serializedProjects[0];
     const firstRole = memberProjectRows[0].role as ProjectRole;
 
-    const [typeRows, statusRows, fieldRows, itemRows, projectViews] =
+    const [typeRows, statusRows, fieldRows, itemRows, projectViews, memberRows] =
       await Promise.all([
         db
           .select()
@@ -73,11 +74,29 @@ export default async function HomePage() {
           .where(eq(items.projectId, first.id))
           .orderBy(asc(items.position), asc(items.number)),
         ensureProjectViews(first),
+        db
+          .select({
+            id: projectMembers.id,
+            projectId: projectMembers.projectId,
+            userId: projectMembers.userId,
+            role: projectMembers.role,
+            createdAt: projectMembers.createdAt,
+            email: users.email,
+            name: users.name,
+          })
+          .from(projectMembers)
+          .innerJoin(users, eq(projectMembers.userId, users.id))
+          .where(eq(projectMembers.projectId, first.id))
+          .orderBy(asc(projectMembers.createdAt)),
       ]);
 
     initialBundle = {
       project: first,
       myRole: firstRole,
+      members: memberRows.map((m) => ({
+        ...m,
+        role: m.role as ProjectRole,
+      })),
       itemTypes: typeRows.map(serializeItemType),
       statuses: statusRows.map(serializeStatus),
       customFields: fieldRows.map(serializeCustomField),

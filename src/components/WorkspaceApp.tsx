@@ -23,16 +23,19 @@ import {
   Eye,
   Settings,
   Shield,
+  Filter,
 } from "lucide-react";
 import type {
+  CustomSwimline,
   Priority,
   Project,
   ProjectBundle,
   ProjectView,
+  QuickFilterDef,
   User,
   WorkItem,
 } from "@/types";
-import { DynamicIcon, PRIORITY_LIST, PRIORITY_META } from "@/lib/icons";
+import { DynamicIcon, PRIORITY_LIST, PRIORITY_META, PriorityIcon } from "@/lib/icons";
 import { getDefaultChildTypeId } from "@/lib/hierarchy";
 import { compileQuery } from "@/lib/query";
 import { cn } from "@/lib/utils";
@@ -46,6 +49,7 @@ import { CommandPalette } from "./CommandPalette";
 import { ViewEditorModal } from "./ViewEditorModal";
 import { AccountSecurityModal } from "./AccountSecurityModal";
 import { AdminConsoleView } from "./AdminConsoleView";
+import { ToolbarMultiFilter, type FilterOption } from "./ToolbarMultiFilter";
 
 interface WorkspaceAppProps {
   currentUser: User;
@@ -83,6 +87,12 @@ export function WorkspaceApp({
       initialBundle?.project.settings.defaultSwimlane ??
       "none"
   );
+  const [customSwimlines, setCustomSwimlines] = useState<CustomSwimline[]>(
+    initialView?.filters?.customSwimlines ?? []
+  );
+  const [quickFilters, setQuickFilters] = useState<QuickFilterDef[]>(
+    initialView?.filters?.quickFilters ?? []
+  );
   const [hiddenStatusIds, setHiddenStatusIds] = useState<string[]>(
     initialView?.hiddenStatusIds ?? []
   );
@@ -92,8 +102,18 @@ export function WorkspaceApp({
 
   // Ad-hoc quick filters (layered on top of the view's JQL query)
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterTypeId, setFilterTypeId] = useState<string>("all");
-  const [filterPriority, setFilterPriority] = useState<string>("all");
+  const [filterTypeIds, setFilterTypeIds] = useState<string[]>([]);
+  const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
+  const [fieldQuickFilterValues, setFieldQuickFilterValues] = useState<
+    Record<string, string[]>
+  >({});
+  const [activeQueryFilterIds, setActiveQueryFilterIds] = useState<string[]>(
+    []
+  );
+  const [showAddQuickFilter, setShowAddQuickFilter] = useState(false);
+  const [newQfTab, setNewQfTab] = useState<"field" | "query">("field");
+  const [newQfLabel, setNewQfLabel] = useState("");
+  const [newQfQuery, setNewQfQuery] = useState("");
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
 
   // Modals
@@ -101,6 +121,7 @@ export function WorkspaceApp({
   const [createItemDefaults, setCreateItemDefaults] = useState<{
     statusId?: string;
     priority?: Priority;
+    ownerId?: string | null;
     typeId?: string;
     parentId?: string | null;
     customFields?: Record<string, unknown>;
@@ -127,11 +148,16 @@ export function WorkspaceApp({
     setMode("view");
     setJqlQuery(v.query ?? "");
     setSwimlaneBy(v.swimlaneBy ?? "none");
+    setCustomSwimlines(v.filters?.customSwimlines ?? []);
+    setQuickFilters(v.filters?.quickFilters ?? []);
     setHiddenStatusIds(v.hiddenStatusIds ?? []);
     setCompactCards(Boolean(v.compact));
     setSearchQuery("");
-    setFilterTypeId("all");
-    setFilterPriority("all");
+    setFilterTypeIds([]);
+    setFilterPriorities([]);
+    setFieldQuickFilterValues({});
+    setActiveQueryFilterIds([]);
+    setShowAddQuickFilter(false);
     setShowColumnsMenu(false);
     setShowQueryBar(false);
   }, []);
@@ -256,18 +282,87 @@ export function WorkspaceApp({
       statuses: bundle.statuses,
       customFields: bundle.customFields,
       allItems: bundle.items,
+      members: bundle.members,
+      currentUserId: currentUser.id,
     });
-  }, [bundle, jqlQuery]);
+  }, [bundle, jqlQuery, currentUser.id]);
 
-  // Filtered items = JQL query + ad-hoc quick filters
+  // Pre-compile active query-based quick filter pills
+  const activeCompiledQuickQueries = useMemo(() => {
+    if (!bundle || activeQueryFilterIds.length === 0) return [];
+    const ctx = {
+      itemTypes: bundle.itemTypes,
+      statuses: bundle.statuses,
+      customFields: bundle.customFields,
+      allItems: bundle.items,
+      members: bundle.members,
+      currentUserId: currentUser.id,
+    };
+    return quickFilters
+      .filter(
+        (qf): qf is Extract<QuickFilterDef, { kind: "query" }> =>
+          qf.kind === "query" && activeQueryFilterIds.includes(qf.id)
+      )
+      .map((qf) => compileQuery(qf.query, ctx));
+  }, [bundle, quickFilters, activeQueryFilterIds, currentUser.id]);
+
+  // Filtered items = JQL query + multi-select Types/Priorities + custom quick filters + quick search
   const filteredItems = useMemo(() => {
     if (!bundle) return [];
     const q = searchQuery.trim().toLowerCase();
     return bundle.items.filter((item) => {
       if (compiledQuery.ok && !compiledQuery.matches(item)) return false;
-      if (filterTypeId !== "all" && item.typeId !== filterTypeId) return false;
-      if (filterPriority !== "all" && item.priority !== filterPriority)
+      if (filterTypeIds.length > 0 && !filterTypeIds.includes(item.typeId)) {
         return false;
+      }
+      if (
+        filterPriorities.length > 0 &&
+        !filterPriorities.includes(item.priority)
+      ) {
+        return false;
+      }
+
+      // Active query quick filter pills
+      for (const compiled of activeCompiledQuickQueries) {
+        if (compiled.ok && !compiled.matches(item)) return false;
+      }
+
+      // Active field quick filter dropdowns
+      for (const qf of quickFilters) {
+        if (qf.kind !== "field") continue;
+        const selected = fieldQuickFilterValues[qf.id];
+        if (!selected || selected.length === 0) continue;
+
+        if (qf.fieldKey === "owner") {
+          const itemOwnerKey = item.ownerId ?? "__unassigned__";
+          if (!selected.includes(itemOwnerKey)) return false;
+        } else if (qf.fieldKey === "labels") {
+          const itemLabelsLower = new Set(
+            item.labels.map((l) => l.toLowerCase())
+          );
+          if (!selected.some((sel) => itemLabelsLower.has(sel.toLowerCase()))) {
+            return false;
+          }
+        } else if (qf.fieldKey.startsWith("cf:")) {
+          const cfId = qf.fieldKey.slice(3);
+          const cfDef = bundle.customFields.find((c) => c.id === cfId);
+          const rawVal = item.customFields[cfId];
+          if (cfDef?.fieldType === "multi_select") {
+            const arr = Array.isArray(rawVal) ? (rawVal as string[]) : [];
+            if (!selected.some((sel) => arr.includes(sel))) return false;
+          } else if (cfDef?.fieldType === "checkbox") {
+            const strVal = rawVal ? "true" : "false";
+            if (!selected.includes(strVal)) return false;
+          } else {
+            const strVal =
+              rawVal === undefined || rawVal === null || rawVal === ""
+                ? "__empty__"
+                : String(rawVal);
+            if (!selected.includes(strVal)) return false;
+          }
+        }
+      }
+
       if (q) {
         const hit =
           item.title.toLowerCase().includes(q) ||
@@ -278,7 +373,16 @@ export function WorkspaceApp({
       }
       return true;
     });
-  }, [bundle, compiledQuery, searchQuery, filterTypeId, filterPriority]);
+  }, [
+    bundle,
+    compiledQuery,
+    searchQuery,
+    filterTypeIds,
+    filterPriorities,
+    activeCompiledQuickQueries,
+    quickFilters,
+    fieldQuickFilterValues,
+  ]);
 
   const visibleStatuses = useMemo(() => {
     if (!bundle) return [];
@@ -294,13 +398,24 @@ export function WorkspaceApp({
     const sameHidden =
       JSON.stringify([...hiddenStatusIds].sort()) ===
       JSON.stringify([...(activeView.hiddenStatusIds ?? [])].sort());
+    const sameCustomLanes =
+      JSON.stringify(customSwimlines) ===
+      JSON.stringify(activeView.filters?.customSwimlines ?? []);
     return (
       jqlQuery.trim() !== (activeView.query ?? "").trim() ||
       swimlaneBy !== (activeView.swimlaneBy ?? "none") ||
       compactCards !== Boolean(activeView.compact) ||
-      !sameHidden
+      !sameHidden ||
+      !sameCustomLanes
     );
-  }, [activeView, jqlQuery, swimlaneBy, compactCards, hiddenStatusIds]);
+  }, [
+    activeView,
+    jqlQuery,
+    swimlaneBy,
+    customSwimlines,
+    compactCards,
+    hiddenStatusIds,
+  ]);
 
   const handleSaveCurrentView = async () => {
     if (!bundle || !activeView || !compiledQuery.ok) return;
@@ -311,6 +426,11 @@ export function WorkspaceApp({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: jqlQuery.trim(),
+          filters: {
+            ...(activeView.filters ?? {}),
+            customSwimlines,
+            quickFilters,
+          },
           swimlaneBy,
           hiddenStatusIds,
           compact: compactCards,
@@ -384,6 +504,135 @@ export function WorkspaceApp({
     [bundle]
   );
 
+  const persistQuickFilters = async (nextQfs: QuickFilterDef[]) => {
+    setQuickFilters(nextQfs);
+    if (!bundle || !activeView) return;
+    const res = await fetch(
+      `/api/projects/${bundle.project.id}/views/${activeView.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filters: {
+            ...(activeView.filters ?? {}),
+            customSwimlines,
+            quickFilters: nextQfs,
+          },
+        }),
+      }
+    );
+    if (res.ok) {
+      const updated: ProjectView = await res.json();
+      setBundle((prev) =>
+        prev
+          ? {
+              ...prev,
+              views: prev.views.map((v) => (v.id === updated.id ? updated : v)),
+            }
+          : prev
+      );
+    }
+  };
+
+  const handleAddFieldQuickFilter = (
+    fieldKey: "owner" | "labels" | `cf:${string}`,
+    label: string
+  ) => {
+    if (quickFilters.some((q) => q.kind === "field" && q.fieldKey === fieldKey)) {
+      setShowAddQuickFilter(false);
+      return;
+    }
+    const next: QuickFilterDef = {
+      id: `qf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: "field",
+      label,
+      fieldKey,
+    };
+    persistQuickFilters([...quickFilters, next]);
+    setShowAddQuickFilter(false);
+  };
+
+  const handleAddQueryQuickFilter = (label: string, query: string) => {
+    if (!label.trim() || !query.trim()) return;
+    const next: QuickFilterDef = {
+      id: `qf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: "query",
+      label: label.trim(),
+      query: query.trim(),
+    };
+    persistQuickFilters([...quickFilters, next]);
+    setNewQfLabel("");
+    setNewQfQuery("");
+    setShowAddQuickFilter(false);
+  };
+
+  const handleRemoveQuickFilter = (qfId: string) => {
+    setFieldQuickFilterValues((prev) => {
+      const copy = { ...prev };
+      delete copy[qfId];
+      return copy;
+    });
+    setActiveQueryFilterIds((prev) => prev.filter((id) => id !== qfId));
+    persistQuickFilters(quickFilters.filter((q) => q.id !== qfId));
+  };
+
+  const getFieldQuickFilterOptions = (
+    fieldKey: "owner" | "labels" | `cf:${string}`
+  ): FilterOption[] => {
+    if (!bundle) return [];
+    if (fieldKey === "owner") {
+      return [
+        ...(bundle.members ?? []).map((m) => ({
+          id: m.userId,
+          label: m.userId === currentUser.id ? `${m.name} (Me)` : m.name,
+          color: "#3b82f6",
+        })),
+        { id: "__unassigned__", label: "Unassigned", color: "#94a3b8" },
+      ];
+    }
+    if (fieldKey === "labels") {
+      const map = new Map<string, string>();
+      for (const i of bundle.items) {
+        for (const l of i.labels) {
+          const low = l.toLowerCase();
+          if (!map.has(low)) map.set(low, l);
+        }
+      }
+      return [...map.values()]
+        .sort((a, b) => a.localeCompare(b))
+        .map((l) => ({ id: l, label: l }));
+    }
+    if (fieldKey.startsWith("cf:")) {
+      const cfId = fieldKey.slice(3);
+      const cf = bundle.customFields.find((c) => c.id === cfId);
+      if (!cf) return [];
+      if (cf.fieldType === "select" || cf.fieldType === "multi_select") {
+        return cf.options.map((o) => ({
+          id: o.id,
+          label: o.label,
+          color: o.color,
+        }));
+      }
+      if (cf.fieldType === "checkbox") {
+        return [
+          { id: "true", label: "Yes", color: "#10b981" },
+          { id: "false", label: "No", color: "#94a3b8" },
+        ];
+      }
+      const uniqueVals = new Set<string>();
+      for (const i of bundle.items) {
+        const v = i.customFields[cfId];
+        if (v !== undefined && v !== null && v !== "") {
+          uniqueVals.add(String(v));
+        }
+      }
+      return [...uniqueVals]
+        .sort((a, b) => a.localeCompare(b))
+        .map((v) => ({ id: v, label: v }));
+    }
+    return [];
+  };
+
   // Item CRUD handlers
   const handleCreateItem = async (payload: {
     title: string;
@@ -391,6 +640,7 @@ export function WorkspaceApp({
     typeId: string;
     statusId: string;
     priority: Priority;
+    ownerId: string | null;
     parentId: string | null;
     labels: string[];
     dueDate: string | null;
@@ -481,6 +731,7 @@ export function WorkspaceApp({
       typeId: defaultType,
       statusId: defaultStatus,
       priority: "medium",
+      ownerId: currentUser.id,
       parentId: parent.id,
       labels: [],
       dueDate: null,
@@ -520,6 +771,7 @@ export function WorkspaceApp({
       ...(item.id === itemId && extraPatch
         ? {
             priority: extraPatch.priority,
+            ownerId: extraPatch.ownerId,
             typeId: extraPatch.typeId,
             parentId: extraPatch.parentId,
             customFields: extraPatch.customFields,
@@ -569,8 +821,10 @@ export function WorkspaceApp({
 
   const hasActiveFilters =
     searchQuery.trim() !== "" ||
-    filterTypeId !== "all" ||
-    filterPriority !== "all";
+    filterTypeIds.length > 0 ||
+    filterPriorities.length > 0 ||
+    activeQueryFilterIds.length > 0 ||
+    Object.values(fieldQuickFilterValues).some((arr) => arr.length > 0);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f4f5f7] dark:bg-[#0f1117]">
@@ -994,39 +1248,247 @@ export function WorkspaceApp({
                   />
                 </div>
 
-                <select
-                  value={filterTypeId}
-                  onChange={(e) => setFilterTypeId(e.target.value)}
-                  className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none"
-                >
-                  <option value="all">All Types</option>
-                  {bundle.itemTypes.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.pluralName}
-                    </option>
-                  ))}
-                </select>
+                <ToolbarMultiFilter
+                  label="Types"
+                  allLabel="All Types"
+                  selected={filterTypeIds}
+                  onChange={setFilterTypeIds}
+                  options={bundle.itemTypes.map((t) => ({
+                    id: t.id,
+                    label: t.pluralName,
+                    icon: (
+                      <DynamicIcon
+                        name={t.icon}
+                        className="h-3.5 w-3.5 shrink-0"
+                        style={{ color: t.color }}
+                      />
+                    ),
+                  }))}
+                />
 
-                <select
-                  value={filterPriority}
-                  onChange={(e) => setFilterPriority(e.target.value)}
-                  className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none"
-                >
-                  <option value="all">All Priorities</option>
-                  {PRIORITY_LIST.map((p) => (
-                    <option key={p} value={p}>
-                      {PRIORITY_META[p].label}
-                    </option>
-                  ))}
-                </select>
+                <ToolbarMultiFilter
+                  label="Priorities"
+                  allLabel="All Priorities"
+                  selected={filterPriorities}
+                  onChange={setFilterPriorities}
+                  options={PRIORITY_LIST.map((p) => ({
+                    id: p,
+                    label: PRIORITY_META[p].label,
+                    icon: <PriorityIcon priority={p} className="h-3.5 w-3.5 shrink-0" />,
+                  }))}
+                />
+
+                {/* User-added Quick Filters */}
+                {quickFilters.map((qf) =>
+                  qf.kind === "field" ? (
+                    <ToolbarMultiFilter
+                      key={qf.id}
+                      label={qf.label}
+                      allLabel={`All ${qf.label}`}
+                      options={getFieldQuickFilterOptions(qf.fieldKey)}
+                      selected={fieldQuickFilterValues[qf.id] ?? []}
+                      onChange={(next) =>
+                        setFieldQuickFilterValues((prev) => ({
+                          ...prev,
+                          [qf.id]: next,
+                        }))
+                      }
+                      removable
+                      onRemove={() => handleRemoveQuickFilter(qf.id)}
+                    />
+                  ) : (
+                    <div
+                      key={qf.id}
+                      className={cn(
+                        "inline-flex items-center rounded-md border text-xs font-medium transition-colors",
+                        activeQueryFilterIds.includes(qf.id)
+                          ? "border-blue-500/70 bg-blue-600 text-white"
+                          : "border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] text-slate-700 dark:text-slate-200 hover:border-blue-400"
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveQueryFilterIds((prev) =>
+                            prev.includes(qf.id)
+                              ? prev.filter((id) => id !== qf.id)
+                              : [...prev, qf.id]
+                          )
+                        }
+                        title={qf.query}
+                        className="px-2.5 py-1 focus:outline-none"
+                      >
+                        {qf.label}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveQuickFilter(qf.id)}
+                        title={`Remove "${qf.label}" quick filter`}
+                        className={cn(
+                          "pr-1.5 pl-0.5 py-1",
+                          activeQueryFilterIds.includes(qf.id)
+                            ? "text-blue-100 hover:text-white"
+                            : "text-slate-400 hover:text-red-500"
+                        )}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )
+                )}
+
+                {/* + Quick Filter Creator */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddQuickFilter((o) => !o)}
+                    className="inline-flex items-center gap-1 rounded-md border border-dashed border-slate-300 dark:border-slate-700 px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                  >
+                    <Filter className="h-3 w-3" />
+                    <span>+ Quick Filter</span>
+                  </button>
+
+                  {showAddQuickFilter && (
+                    <div
+                      className="absolute left-0 top-full mt-1.5 z-40 w-72 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#161922] shadow-2xl p-3 space-y-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="grid grid-cols-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#11141d] p-0.5 text-[11px] font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setNewQfTab("field")}
+                          className={cn(
+                            "rounded-md py-1 transition-colors",
+                            newQfTab === "field"
+                              ? "bg-white dark:bg-[#1a1f2c] text-slate-900 dark:text-white shadow-xs"
+                              : "text-slate-500"
+                          )}
+                        >
+                          Field Dropdown
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNewQfTab("query")}
+                          className={cn(
+                            "rounded-md py-1 transition-colors",
+                            newQfTab === "query"
+                              ? "bg-white dark:bg-[#1a1f2c] text-slate-900 dark:text-white shadow-xs"
+                              : "text-slate-500"
+                          )}
+                        >
+                          Toggle Pill
+                        </button>
+                      </div>
+
+                      {newQfTab === "field" ? (
+                        <div className="space-y-1 max-h-52 overflow-y-auto">
+                          <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                            Add dropdown filter to bar
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleAddFieldQuickFilter("owner", "Owners")
+                            }
+                            className="w-full flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                          >
+                            <span>Owner (User)</span>
+                            <Plus className="h-3.5 w-3.5 text-blue-500" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleAddFieldQuickFilter("labels", "Labels")
+                            }
+                            className="w-full flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                          >
+                            <span>Labels</span>
+                            <Plus className="h-3.5 w-3.5 text-blue-500" />
+                          </button>
+                          {bundle.customFields.map((cf) => (
+                            <button
+                              key={cf.id}
+                              type="button"
+                              onClick={() =>
+                                handleAddFieldQuickFilter(
+                                  `cf:${cf.id}`,
+                                  cf.name
+                                )
+                              }
+                              className="w-full flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                            >
+                              <span className="truncate">{cf.name}</span>
+                              <Plus className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5">
+                          <div className="flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAddQueryQuickFilter(
+                                  "Only Mine",
+                                  "owner = me"
+                                )
+                              }
+                              className="rounded bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-[10.5px] font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-100"
+                            >
+                              + Only Mine
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAddQueryQuickFilter(
+                                  "Unassigned",
+                                  "owner is empty"
+                                )
+                              }
+                              className="rounded bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10.5px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+                            >
+                              + Unassigned
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            value={newQfLabel}
+                            onChange={(e) => setNewQfLabel(e.target.value)}
+                            placeholder="Pill name (e.g. Urgent Bugs)"
+                            className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs"
+                          />
+                          <input
+                            type="text"
+                            value={newQfQuery}
+                            onChange={(e) => setNewQfQuery(e.target.value)}
+                            placeholder="Query (e.g. priority = urgent)"
+                            className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 font-mono text-xs"
+                          />
+                          <button
+                            type="button"
+                            disabled={!newQfLabel.trim() || !newQfQuery.trim()}
+                            onClick={() =>
+                              handleAddQueryQuickFilter(newQfLabel, newQfQuery)
+                            }
+                            className="w-full rounded-md bg-blue-600 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+                          >
+                            Add Quick Filter Pill
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 {hasActiveFilters && (
                   <button
                     type="button"
                     onClick={() => {
                       setSearchQuery("");
-                      setFilterTypeId("all");
-                      setFilterPriority("all");
+                      setFilterTypeIds([]);
+                      setFilterPriorities([]);
+                      setFieldQuickFilterValues({});
+                      setActiveQueryFilterIds([]);
                     }}
                     className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-200/70 dark:hover:bg-slate-800"
                   >
@@ -1106,15 +1568,29 @@ export function WorkspaceApp({
                     )}
                   </div>
 
-                  {/* Swimlanes */}
+                  {/* Swimlines */}
                   <div className="flex items-center gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1">
                     <Rows3 className="h-3.5 w-3.5 text-blue-500" />
                     <span className="text-[11px] font-semibold text-slate-500">
-                      Swimlanes:
+                      Swimlines:
                     </span>
                     <select
                       value={swimlaneBy}
-                      onChange={(e) => setSwimlaneBy(e.target.value)}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setSwimlaneBy(next);
+                        if (
+                          next === "custom" &&
+                          customSwimlines.length === 0 &&
+                          activeView
+                        ) {
+                          setViewModalState({
+                            open: true,
+                            editingView: activeView,
+                            draftFromCurrent: true,
+                          });
+                        }
+                      }}
                       className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none cursor-pointer"
                     >
                       <option
@@ -1136,10 +1612,25 @@ export function WorkspaceApp({
                         Item Type
                       </option>
                       <option
+                        value="owner"
+                        className="bg-white dark:bg-slate-900"
+                      >
+                        Owner
+                      </option>
+                      <option
                         value="parent"
                         className="bg-white dark:bg-slate-900"
                       >
                         Parent Item
+                      </option>
+                      <option
+                        value="custom"
+                        className="bg-white dark:bg-slate-900"
+                      >
+                        Custom Queries
+                        {customSwimlines.length > 0
+                          ? ` (${customSwimlines.length})`
+                          : ""}
                       </option>
                       {selectCustomFields.map((cf) => (
                         <option
@@ -1151,6 +1642,22 @@ export function WorkspaceApp({
                         </option>
                       ))}
                     </select>
+                    {swimlaneBy === "custom" && activeView && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewModalState({
+                            open: true,
+                            editingView: activeView,
+                            draftFromCurrent: true,
+                          })
+                        }
+                        title="Edit custom swimlines"
+                        className="ml-0.5 rounded p-0.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-blue-600"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Density */}
@@ -1181,6 +1688,7 @@ export function WorkspaceApp({
           className="flex-1 min-h-0 overflow-hidden relative"
           onClick={() => {
             if (showColumnsMenu) setShowColumnsMenu(false);
+            if (showAddQuickFilter) setShowAddQuickFilter(false);
           }}
         >
           {loadingProject && (
@@ -1236,6 +1744,7 @@ export function WorkspaceApp({
                 filteredItems={filteredItems}
                 visibleStatuses={visibleStatuses}
                 swimlaneBy={swimlaneBy}
+                customSwimlines={customSwimlines}
                 compact={compactCards}
                 onSelectItem={(item) => setSelectedItemId(item.id)}
                 onQuickCreate={(defaults) => setCreateItemDefaults(defaults)}
@@ -1276,6 +1785,7 @@ export function WorkspaceApp({
       {bundle && createItemDefaults !== null && (
         <CreateItemModal
           bundle={bundle}
+          currentUserId={currentUser.id}
           defaults={createItemDefaults}
           onClose={() => setCreateItemDefaults(null)}
           onCreate={handleCreateItem}
@@ -1303,6 +1813,7 @@ export function WorkspaceApp({
                   query: jqlQuery,
                   hiddenStatusIds,
                   swimlaneBy,
+                  customSwimlines,
                   compact: compactCards,
                 }
               : undefined

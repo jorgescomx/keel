@@ -69,7 +69,7 @@ export async function POST(req: Request, { params }: Params) {
     name,
     layout: body.layout === "list" ? "list" : "board",
     query: encryptString(query),
-    filters: JSON.stringify(filters),
+    filters: encryptString(JSON.stringify(filters)),
     hiddenStatusIds: JSON.stringify(hiddenStatusIds),
     swimlaneBy,
     compact: Boolean(body.compact),

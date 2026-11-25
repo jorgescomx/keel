@@ -1,6 +1,7 @@
 import type {
   CustomFieldDef,
   ItemType,
+  ProjectMember,
   StatusColumn,
   WorkItem,
 } from "@/types";
@@ -10,6 +11,8 @@ export interface QueryContext {
   statuses: StatusColumn[];
   customFields: CustomFieldDef[];
   allItems: WorkItem[];
+  members?: ProjectMember[];
+  currentUserId?: string;
 }
 
 export type QueryParseResult =
@@ -295,6 +298,16 @@ function getFieldValues(
     if (!item.parentId) return [];
     const p = ctx.allItems.find((x) => x.id === item.parentId);
     return p ? [p.key, p.title] : [];
+  }
+  if (f === "owner" || f === "assignee" || f === "user") {
+    if (!item.ownerId) return [];
+    const m = ctx.members?.find((x) => x.userId === item.ownerId);
+    const vals = [item.ownerId];
+    if (m) vals.push(m.name, m.email);
+    if (ctx.currentUserId && item.ownerId === ctx.currentUserId) {
+      vals.push("me");
+    }
+    return vals;
   }
 
   // Match custom field by name (case-insensitive)

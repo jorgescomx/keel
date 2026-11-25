@@ -1143,7 +1143,7 @@ export function ProjectSettingsView({
                           )}
                           {cf.fieldType === "select" && (
                             <span className="rounded bg-blue-500/10 px-2 py-0.5 text-[10.5px] font-medium text-blue-600 dark:text-blue-400">
-                              Swimlane-ready
+                              Swimline-ready
                             </span>
                           )}
                         </div>
@@ -1430,7 +1430,7 @@ export function ProjectSettingsView({
                             : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                         )}
                       >
-                        Single Value (Swimlane-ready)
+                        Single Value (Swimline-ready)
                       </button>
                       <button
                         type="button"
@@ -1573,6 +1573,7 @@ export function ProjectSettingsView({
                 ["showDueDate", "Due Date"],
                 ["showSubitemCount", "Sub-item Counter"],
                 ["showParent", "Parent Breadcrumb"],
+                ["showOwner", "Owner Avatar"],
               ] as [keyof ProjectSettings["cardFields"], string][]
             ).map(([field, label]) => (
               <label

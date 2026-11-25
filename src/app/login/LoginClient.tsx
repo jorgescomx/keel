@@ -132,7 +132,7 @@ export function LoginClient({
               ? "Sign in or create an account to accept your project invitation."
               : mode === "register" && isFirstRun
                 ? "Create your master admin account to get started."
-                : "Customizable boards, swimlanes, and project tracking."}
+                : "Customizable boards, swimlines, and project tracking."}
           </p>
         </div>
 

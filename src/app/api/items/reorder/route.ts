@@ -45,6 +45,7 @@ export async function POST(req: Request) {
     statusId: string;
     position: number;
     priority?: Priority;
+    ownerId?: string | null;
     typeId?: string;
     parentId?: string | null;
     customFields?: Record<string, unknown>;
@@ -85,6 +86,14 @@ export async function POST(req: Request) {
         );
       }
       entry.priority = raw.priority as Priority;
+    }
+
+    if ("ownerId" in raw && raw.ownerId !== undefined) {
+      if (raw.ownerId === null || raw.ownerId === "") {
+        entry.ownerId = null;
+      } else if (typeof raw.ownerId === "string") {
+        entry.ownerId = raw.ownerId.trim() || null;
+      }
     }
 
     if (raw.typeId !== undefined) {
@@ -178,6 +187,7 @@ export async function POST(req: Request) {
         updatedAt: now,
       };
       if (u.priority !== undefined) patch.priority = u.priority;
+      if (u.ownerId !== undefined) patch.ownerId = u.ownerId;
       if (u.typeId !== undefined) patch.typeId = u.typeId;
       if (u.parentId !== undefined) patch.parentId = u.parentId;
       if (u.customFields !== undefined) {

@@ -245,9 +245,9 @@ export async function seedIfEmpty() {
       projectId: p1,
       key: "PLAT-3",
       number: 3,
-      title: "Fix swimlane collapse state not persisting on reload",
+      title: "Fix swimline collapse state not persisting on reload",
       description:
-        "When collapsing a swimlane and refreshing the browser, all lanes expand again.",
+        "When collapsing a swimline and refreshing the browser, all lines expand again.",
       typeId: t1Bug,
       statusId: s1Todo,
       priority: "urgent",
@@ -378,7 +378,7 @@ export async function seedIfEmpty() {
     id: id(),
     itemId: i1Parent,
     author: "You",
-    body: "Kickoff note: try switching the **Swimlanes** dropdown above the board to **Workstream**, **Item Type**, or **Parent**!",
+    body: "Kickoff note: try switching the **Swimlines** dropdown above the board to **Workstream**, **Item Type**, or **Parent**!",
     createdAt: now,
   });
 

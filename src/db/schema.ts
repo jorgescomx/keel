@@ -67,6 +67,7 @@ export const items = sqliteTable("items", {
     .notNull()
     .references(() => statuses.id),
   priority: text("priority").notNull().default("medium"),
+  ownerId: text("owner_id"),
   parentId: text("parent_id"),
   labels: text("labels").notNull().default("[]"),
   dueDate: text("due_date"),

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, ensureDbReady } from "@/db";
-import { items, projects } from "@/db/schema";
+import { items, projectMembers, projects } from "@/db/schema";
 import { serializeItem, serializeProject } from "@/db/serializers";
 import {
   checkSameOrigin,
@@ -74,6 +74,33 @@ export async function PATCH(req: Request, { params }: Params) {
       return NextResponse.json({ error: "Invalid priority" }, { status: 400 });
     }
     updateData.priority = body.priority;
+  }
+
+  if ("ownerId" in body) {
+    if (body.ownerId === null || body.ownerId === "") {
+      updateData.ownerId = null;
+    } else if (typeof body.ownerId === "string" && body.ownerId.trim()) {
+      const candidateOwner = body.ownerId.trim();
+      const [member] = await db
+        .select({ id: projectMembers.id })
+        .from(projectMembers)
+        .where(
+          and(
+            eq(projectMembers.projectId, existing.projectId),
+            eq(projectMembers.userId, candidateOwner)
+          )
+        )
+        .limit(1);
+      if (!member) {
+        return NextResponse.json(
+          { error: "Owner must be a member of this project" },
+          { status: 400 }
+        );
+      }
+      updateData.ownerId = candidateOwner;
+    } else {
+      return NextResponse.json({ error: "Invalid ownerId" }, { status: 400 });
+    }
   }
 
   let nextParentId: string | null | undefined;

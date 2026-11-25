@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, ensureDbReady } from "@/db";
-import { items, projects } from "@/db/schema";
+import { items, projectMembers, projects } from "@/db/schema";
 import { serializeItem, serializeProject } from "@/db/serializers";
 import {
   LIMITS,
@@ -107,6 +107,33 @@ export async function POST(req: Request, { params }: Params) {
       ? body.description.slice(0, LIMITS.DESCRIPTION)
       : "";
 
+  // Owner defaults to whoever created the card; if specified, must be a project member (or null)
+  let ownerId: string | null = access.user.id;
+  if ("ownerId" in body) {
+    if (body.ownerId === null || body.ownerId === "") {
+      ownerId = null;
+    } else if (typeof body.ownerId === "string" && body.ownerId.trim()) {
+      const candidateOwner = body.ownerId.trim();
+      const [member] = await db
+        .select({ id: projectMembers.id })
+        .from(projectMembers)
+        .where(
+          and(
+            eq(projectMembers.projectId, projectId),
+            eq(projectMembers.userId, candidateOwner)
+          )
+        )
+        .limit(1);
+      if (!member) {
+        return NextResponse.json(
+          { error: "Owner must be a member of this project" },
+          { status: 400 }
+        );
+      }
+      ownerId = candidateOwner;
+    }
+  }
+
   const now = new Date().toISOString();
   const itemId = crypto.randomUUID();
 
@@ -143,6 +170,7 @@ export async function POST(req: Request, { params }: Params) {
       typeId,
       statusId,
       priority,
+      ownerId,
       parentId,
       labels: JSON.stringify(labels),
       dueDate,

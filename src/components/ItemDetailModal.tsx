@@ -53,7 +53,7 @@ export function ItemDetailModal({
   onDeleteItem,
   onCreateSubitem,
 }: ItemDetailModalProps) {
-  const { project, itemTypes, statuses, customFields, items } = bundle;
+  const { project, itemTypes, statuses, customFields, items, members } = bundle;
 
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description);
@@ -557,6 +557,27 @@ export function ItemDetailModal({
                 {itemTypes.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Owner */}
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                Owner
+              </label>
+              <select
+                value={item.ownerId ?? ""}
+                onChange={(e) =>
+                  onUpdateItem(item.id, { ownerId: e.target.value || null })
+                }
+                className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-1.5 text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              >
+                <option value="">Unassigned</option>
+                {(members ?? []).map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.name} ({m.email})
                   </option>
                 ))}
               </select>

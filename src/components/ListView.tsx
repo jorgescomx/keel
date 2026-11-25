@@ -41,7 +41,7 @@ export function ListView({
   onUpdateItem,
   onQuickCreate,
 }: ListViewProps) {
-  const { project, itemTypes, statuses, customFields } = bundle;
+  const { project, itemTypes, statuses, customFields, members } = bundle;
   const [treeMode, setTreeMode] = useState(true);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -182,6 +182,7 @@ export function ListView({
                 <th className="py-2.5 px-3 w-36">Type</th>
                 <th className="py-2.5 px-3 min-w-[280px]">Title</th>
                 <th className="py-2.5 px-3 w-40">Status</th>
+                <th className="py-2.5 px-3 w-36">Owner</th>
                 <th className="py-2.5 px-3 w-32">Priority</th>
                 <th className="py-2.5 px-3 w-28">Due</th>
                 {customFields.slice(0, 3).map((cf) => (
@@ -296,6 +297,36 @@ export function ListView({
                             className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           >
                             {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td
+                      className="py-2.5 px-3 whitespace-nowrap"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <select
+                        value={item.ownerId ?? ""}
+                        onChange={(e) =>
+                          onUpdateItem(item.id, {
+                            ownerId: e.target.value || null,
+                          })
+                        }
+                        className="bg-transparent text-xs font-medium text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer max-w-[130px]"
+                      >
+                        <option
+                          value=""
+                          className="bg-white dark:bg-slate-900 text-slate-500"
+                        >
+                          Unassigned
+                        </option>
+                        {(members ?? []).map((m) => (
+                          <option
+                            key={m.userId}
+                            value={m.userId}
+                            className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                          >
+                            {m.name}
                           </option>
                         ))}
                       </select>

@@ -9,6 +9,8 @@ import {
   items,
   comments,
   views,
+  projectMembers,
+  users,
 } from "@/db/schema";
 import {
   serializeProject,
@@ -50,7 +52,7 @@ export async function GET(_req: Request, { params }: Params) {
 
   const serializedProject = serializeProject(projectRow);
 
-  const [typeRows, statusRows, fieldRows, itemRows, projectViews] =
+  const [typeRows, statusRows, fieldRows, itemRows, projectViews, memberRows] =
     await Promise.all([
       db
         .select()
@@ -73,11 +75,26 @@ export async function GET(_req: Request, { params }: Params) {
         .where(eq(items.projectId, id))
         .orderBy(asc(items.position), asc(items.number)),
       ensureProjectViews(serializedProject),
+      db
+        .select({
+          id: projectMembers.id,
+          projectId: projectMembers.projectId,
+          userId: projectMembers.userId,
+          role: projectMembers.role,
+          createdAt: projectMembers.createdAt,
+          email: users.email,
+          name: users.name,
+        })
+        .from(projectMembers)
+        .innerJoin(users, eq(projectMembers.userId, users.id))
+        .where(eq(projectMembers.projectId, id))
+        .orderBy(asc(projectMembers.createdAt)),
     ]);
 
   return NextResponse.json({
     project: serializedProject,
     myRole: access.role,
+    members: memberRows,
     itemTypes: typeRows.map(serializeItemType),
     statuses: statusRows.map(serializeStatus),
     customFields: fieldRows.map(serializeCustomField),

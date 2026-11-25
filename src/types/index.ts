@@ -28,6 +28,7 @@ export interface ProjectSettings {
     showDueDate: boolean;
     showSubitemCount: boolean;
     showParent: boolean;
+    showOwner: boolean;
   };
   defaultSwimlane: string; // "none" | "priority" | "type" | "parent" | `cf:${fieldId}`
   enforceHierarchy: boolean;
@@ -88,6 +89,7 @@ export interface WorkItem {
   typeId: string;
   statusId: string;
   priority: Priority;
+  ownerId: string | null;
   parentId: string | null;
   labels: string[];
   dueDate: string | null;
@@ -105,10 +107,33 @@ export interface ItemComment {
   createdAt: string;
 }
 
+export interface CustomSwimline {
+  id: string;
+  name: string;
+  query: string;
+  color: string;
+}
+
+export type QuickFilterDef =
+  | {
+      id: string;
+      kind: "field";
+      label: string;
+      fieldKey: "owner" | "labels" | `cf:${string}`;
+    }
+  | {
+      id: string;
+      kind: "query";
+      label: string;
+      query: string;
+    };
+
 export interface ViewFilters {
   typeIds?: string[];
   priorities?: Priority[];
   labels?: string[];
+  customSwimlines?: CustomSwimline[];
+  quickFilters?: QuickFilterDef[];
 }
 
 export interface ProjectView {
@@ -163,6 +188,7 @@ export interface ProjectInvitation {
 export interface ProjectBundle {
   project: Project;
   myRole: ProjectRole;
+  members: ProjectMember[];
   itemTypes: ItemType[];
   statuses: StatusColumn[];
   customFields: CustomFieldDef[];
@@ -181,6 +207,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
     showDueDate: true,
     showSubitemCount: true,
     showParent: true,
+    showOwner: true,
   },
   defaultSwimlane: "none",
   enforceHierarchy: false,

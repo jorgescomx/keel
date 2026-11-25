@@ -10,9 +10,11 @@ import { MultiSelectDropdown } from "./MultiSelectDropdown";
 
 interface CreateItemModalProps {
   bundle: ProjectBundle;
+  currentUserId: string;
   defaults?: {
     statusId?: string;
     priority?: Priority;
+    ownerId?: string | null;
     typeId?: string;
     parentId?: string | null;
     customFields?: Record<string, unknown>;
@@ -24,6 +26,7 @@ interface CreateItemModalProps {
     typeId: string;
     statusId: string;
     priority: Priority;
+    ownerId: string | null;
     parentId: string | null;
     labels: string[];
     dueDate: string | null;
@@ -33,11 +36,12 @@ interface CreateItemModalProps {
 
 export function CreateItemModal({
   bundle,
+  currentUserId,
   defaults,
   onClose,
   onCreate,
 }: CreateItemModalProps) {
-  const { project, itemTypes, statuses, customFields, items } = bundle;
+  const { project, itemTypes, statuses, customFields, items, members } = bundle;
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -49,6 +53,11 @@ export function CreateItemModal({
   );
   const [priority, setPriority] = useState<Priority>(
     defaults?.priority ?? "medium"
+  );
+  const [ownerId, setOwnerId] = useState<string>(
+    defaults?.ownerId !== undefined
+      ? defaults.ownerId ?? ""
+      : currentUserId
   );
   const [parentId, setParentId] = useState<string>(defaults?.parentId ?? "");
   const [labels, setLabels] = useState<string[]>([]);
@@ -96,6 +105,7 @@ export function CreateItemModal({
         typeId,
         statusId,
         priority,
+        ownerId: ownerId || null,
         parentId: parentId || null,
         labels,
         dueDate: dueDate || null,
@@ -196,7 +206,24 @@ export function CreateItemModal({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                Owner
+              </label>
+              <select
+                value={ownerId}
+                onChange={(e) => setOwnerId(e.target.value)}
+                className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11141d] px-2.5 py-2 text-xs"
+              >
+                <option value="">Unassigned</option>
+                {(members ?? []).map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
                 Priority
