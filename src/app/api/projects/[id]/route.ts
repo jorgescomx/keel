@@ -56,7 +56,7 @@ export async function GET(_req: Request, { params }: Params) {
         .select()
         .from(itemTypes)
         .where(eq(itemTypes.projectId, id))
-        .orderBy(asc(itemTypes.position)),
+        .orderBy(asc(itemTypes.level), asc(itemTypes.position)),
       db
         .select()
         .from(statuses)

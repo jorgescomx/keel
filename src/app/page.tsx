@@ -56,7 +56,7 @@ export default async function HomePage() {
           .select()
           .from(itemTypes)
           .where(eq(itemTypes.projectId, first.id))
-          .orderBy(asc(itemTypes.position)),
+          .orderBy(asc(itemTypes.level), asc(itemTypes.position)),
         db
           .select()
           .from(statuses)
